@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import './App.css';
-
+import Deck from "./Deck.jsx";
 function Toasts({ toasts }) {
   return (
     <div className="toast-wrap">
@@ -89,6 +89,7 @@ export default function App() {
 
   // Return/cancel routes
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
+  if (path.startsWith("/deck")) return <Deck />;
   if (path.startsWith("/payfast/return"))
     return (
       <div className="container">
@@ -99,6 +100,7 @@ export default function App() {
         </div>
         <Toasts toasts={toasts} />
       </div>
+      
     );
   if (path.startsWith("/payfast/cancel"))
     return (

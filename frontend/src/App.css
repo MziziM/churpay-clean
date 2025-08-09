@@ -1,66 +1,33 @@
+/* Light theme overrides so elements don’t appear black */
+:root {
+  --bg: #ffffff;
+  --card: #f8fafc;
+  --muted: #475569;
+  --text: #0f172a;
+  --brand: #2563eb;
+  --ok: #16a34a;
+  --err: #dc2626;
+  --border: #e2e8f0;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
 #root {
   max-width: 1280px;
   margin: 0 auto;
   padding: 2rem;
-  text-align: center;
-}
-.point {
-  background: #f1f5f9;
-  color: #1e293b;
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 14px;
-}
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+  text-align: left;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-  .kpi {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px;
-  text-align: center;
-}
-
-.kpi .value {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--text);
-}
-}
-
-.read-the-docs {
-  color: #888;
-}
+/* buttons */
 .btn {
-  background: #2563eb;
+  background: var(--brand);
   color: #fff;
   padding: 8px 14px;
   border-radius: 8px;
@@ -69,7 +36,52 @@
   cursor: pointer;
   transition: background 0.2s ease;
 }
+.btn:hover { background: #1d4ed8; }
+.btn[disabled] { opacity: .7; cursor: not-allowed; }
 
-.btn:hover {
-  background: #1d4ed8;
+/* chips / points */
+.point {
+  background: #f1f5f9;
+  color: #1e293b;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* cards & KPIs */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+}
+.kpi .value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* misc from Vite scaffold kept for dev convenience */
+.logo { height: 6em; padding: 1.5em; will-change: filter; transition: filter 300ms; }
+.logo:hover { filter: drop-shadow(0 0 2em #646cffaa); }
+.logo.react:hover { filter: drop-shadow(0 0 2em #61dafbaa); }
+@keyframes logo-spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+@media (prefers-reduced-motion: no-preference) { a:nth-of-type(2) .logo { animation: logo-spin infinite 20s linear; } }
+
+.read-the-docs { color: #888; }
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid var(--border);
 }
