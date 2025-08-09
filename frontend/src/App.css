@@ -4,7 +4,13 @@
   padding: 2rem;
   text-align: center;
 }
-
+.point {
+  background: #f1f5f9;
+  color: #1e293b;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+}
 .logo {
   height: 6em;
   padding: 1.5em;
@@ -35,8 +41,35 @@
 
 .card {
   padding: 2em;
+  .kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+}
+
+.kpi .value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+}
 }
 
 .read-the-docs {
   color: #888;
+}
+.btn {
+  background: #2563eb;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.btn:hover {
+  background: #1d4ed8;
 }
