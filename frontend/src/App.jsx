@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import './App.css';
 
 function Toasts({ toasts }) {
   return (
