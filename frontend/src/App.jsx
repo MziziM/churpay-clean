@@ -1,4 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+
+function Toasts({ toasts }) {
+  return (
+    <div className="toast-wrap">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast ${t.type} show`}>
+          {t.title && <div className="title">{t.title}</div>}
+          <div>{t.msg}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function App() {
   const apiBase = import.meta.env.VITE_API_URL?.trim();
@@ -7,14 +20,26 @@ export default function App() {
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [amount, setAmount] = useState("50.00");
   const [busy, setBusy] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const nextId = useRef(1);
   const ZAR = useMemo(() => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }), []);
+
+  const pushToast = (type, msg, title) => {
+    const id = nextId.current++;
+    setToasts(ts => [...ts, { id, type, msg, title }]);
+    setTimeout(() => setToasts(ts => ts.filter(x => x.id !== id)), 3500);
+  };
 
   const loadHealth = async () => {
     try {
       const r = await fetch(`${apiBase}/api/health`);
-      setHealth(await r.json());
+      const j = await r.json();
+      setHealth(j);
+      if (j?.ok) pushToast("ok", "API is reachable.", "Health: OK");
+      else pushToast("err", "Backend health returned ERROR.", "Health");
     } catch (e) {
       setHealth({ ok: false, error: String(e) });
+      pushToast("err", "Failed to reach backend health.", "Network");
     }
   };
 
@@ -22,12 +47,12 @@ export default function App() {
     try {
       setLoadingPayments(true);
       const r = await fetch(`${apiBase}/api/payments`);
-      if (r.ok) {
-        const j = await r.json();
-        setPayments(Array.isArray(j) ? j : (j?.rows || []));
-      }
-    } catch {
-      /* ignore */
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      setPayments(Array.isArray(j) ? j : (j?.rows || []));
+      pushToast("ok", "Payments refreshed.");
+    } catch (e) {
+      pushToast("err", "Could not load payments.");
     } finally {
       setLoadingPayments(false);
     }
@@ -37,7 +62,7 @@ export default function App() {
     const value = String(amt ?? amount).replace(",", ".");
     const num = Number.parseFloat(value);
     if (!Number.isFinite(num) || num <= 0) {
-      alert("Please enter a valid ZAR amount, e.g. 50.00");
+      pushToast("err", "Enter a valid ZAR amount like 50.00", "Invalid amount");
       return;
     }
     try {
@@ -48,16 +73,20 @@ export default function App() {
         body: JSON.stringify({ amount: num.toFixed(2) }),
       });
       const j = await r.json();
-      if (j.redirect) window.location.href = j.redirect;
-      else alert("Failed to start payment.");
-    } catch (e) {
-      alert("Failed to start payment: " + e);
+      if (j.redirect) {
+        pushToast("ok", `Redirecting to PayFast for ${ZAR.format(num)}…`);
+        window.location.href = j.redirect;
+      } else {
+        pushToast("err", "Failed to start payment.");
+      }
+    } catch {
+      pushToast("err", "Network error starting payment.");
     } finally {
       setBusy(false);
     }
   };
 
-  // Simple return/cancel screens (no router)
+  // Return/cancel routes
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
   if (path.startsWith("/payfast/return"))
     return (
@@ -67,6 +96,7 @@ export default function App() {
           <p>Thanks! Your payment was processed.</p>
           <a href="/" className="btn">Back to Home</a>
         </div>
+        <Toasts toasts={toasts} />
       </div>
     );
   if (path.startsWith("/payfast/cancel"))
@@ -77,6 +107,7 @@ export default function App() {
           <p>No charges were made. You can try again anytime.</p>
           <a href="/" className="btn">Back to Home</a>
         </div>
+        <Toasts toasts={toasts} />
       </div>
     );
 
@@ -89,6 +120,7 @@ export default function App() {
 
   return (
     <div className="container">
+      {/* header + hero unchanged */}
       <div className="header">
         <div className="brand">
           <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg,#60a5fa,#22c55e)" }} />
@@ -106,6 +138,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* status card */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div className="kv"><span>API base:</span> <strong>{apiBase}</strong></div>
@@ -123,20 +156,12 @@ export default function App() {
 
       {/* KPIs */}
       <div className="kpis">
-        <div className="kpi">
-          <div className="label">Total processed</div>
-          <div className="value">{ZAR.format(totalZar)}</div>
-        </div>
-        <div className="kpi">
-          <div className="label">Payments</div>
-          <div className="value">{totalCount}</div>
-        </div>
-        <div className="kpi">
-          <div className="label">Last payment</div>
-          <div className="value">{lastCreated}</div>
-        </div>
+        <div className="kpi"><div className="label">Total processed</div><div className="value">{ZAR.format(totalZar)}</div></div>
+        <div className="kpi"><div className="label">Payments</div><div className="value">{totalCount}</div></div>
+        <div className="kpi"><div className="label">Last payment</div><div className="value">{lastCreated}</div></div>
       </div>
 
+      {/* payment form */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row" style={{ gap: 8 }}>
           <label>Amount (ZAR):</label>
@@ -146,6 +171,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* payments table */}
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2 style={{ margin: 0 }}>Recent Payments</h2>
@@ -154,9 +180,7 @@ export default function App() {
         <div className="tableWrap">
           <table>
             <thead>
-              <tr>
-                <th>ID</th><th>PF Payment ID</th><th>Amount</th><th>Status</th><th>Created</th>
-              </tr>
+              <tr><th>ID</th><th>PF Payment ID</th><th>Amount</th><th>Status</th><th>Created</th></tr>
             </thead>
             <tbody>
               {payments.length === 0 ? (
@@ -175,6 +199,8 @@ export default function App() {
         </div>
         <div className="footer">Data updates after PayFast IPN; refresh after completing a payment.</div>
       </div>
+
+      <Toasts toasts={toasts} />
     </div>
   );
 }

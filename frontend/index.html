@@ -24,4 +24,11 @@
 
   tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
   tbody tr:hover { background: rgba(255,255,255,0.04); }
+  /* Toasts */
+.toast-wrap{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{min-width:260px;max-width:480px;background:#0c1424;border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 10px 24px rgba(0,0,0,.25);opacity:0;transform:translateY(8px);transition:all .2s ease}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast .title{font-weight:700;margin-bottom:4px}
+.toast.ok{border-color:#164e28}
+.toast.err{border-color:#5f1c1c}
 </style>
