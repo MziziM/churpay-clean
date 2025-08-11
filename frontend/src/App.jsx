@@ -459,6 +459,17 @@ export default function App() {
     pushToast('warn', `Deleted preset: ${name}`);
   };
 
+  const updatePreset = () => {
+    if (!activePreset?.name) { pushToast('warn', 'No active preset to update.'); return; }
+    const name = activePreset.name;
+    const snapshot = { name, ...currentFilterState() };
+    setPresets((list) => {
+      const others = list.filter((x) => x.name !== name);
+      return [...others, snapshot];
+    });
+    pushToast('ok', `Updated preset: ${name}`);
+  };
+
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
   // read Settings preferences (brand + hide sandbox) saved in localStorage
@@ -717,6 +728,13 @@ if (path === "/settings") {
                 <span className="badge" title="Current filters match this preset">
                   Preset: {activePreset.name}
                 </span>
+                <button
+                  className="btn"
+                  onClick={updatePreset}
+                  title="Overwrite this preset with current filters"
+                >
+                  Update preset
+                </button>
                 <button
                   className="btn ghost"
                   onClick={resetFilters}
