@@ -90,6 +90,14 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('churpay_compact', compact ? 'true' : 'false'); } catch {}
   }, [compact]);
+  const PRESET_KEY = 'churpay_filter_presets';
+  const [presets, setPresets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '[]'); } catch { return []; }
+  });
+  const [presetName, setPresetName] = useState('');
+  useEffect(() => {
+    try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)); } catch {}
+  }, [presets]);
 
   // Escape-to-close for the modal
   useEffect(() => {
@@ -363,6 +371,24 @@ export default function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+  const exportJSON = () => {
+    const payload = {
+      meta: {
+        exported_at: new Date().toISOString(),
+        filtered_count: filteredPayments.length,
+      },
+      rows: filteredPayments,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `payments_${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const resetFilters = () => {
     setQuery("");
@@ -373,6 +399,41 @@ export default function App() {
     setPage(1);
     setSortBy("created_at");
     setSortDir("desc");
+  };
+  const currentFilterState = () => ({
+    query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact
+  });
+
+  const applyPreset = (p) => {
+    if (!p) return;
+    setQuery(p.query ?? '');
+    setStatusFilter(p.statusFilter ?? 'All');
+    setDateRange(p.dateRange ?? 'All');
+    setFromDate(p.fromDate ?? '');
+    setToDate(p.toDate ?? '');
+    setSortBy(p.sortBy ?? 'created_at');
+    setSortDir(p.sortDir ?? 'desc');
+    setPageSize(p.pageSize ?? 10);
+    setCompact(!!p.compact);
+    setPage(1);
+    pushToast('ok', `Applied preset${p.name ? `: ${p.name}` : ''}`);
+  };
+
+  const savePreset = () => {
+    const name = (presetName || '').trim();
+    if (!name) { pushToast('warn', 'Give your preset a name first.'); return; }
+    const snapshot = { name, ...currentFilterState() };
+    setPresets((list) => {
+      const others = list.filter((x) => x.name !== name);
+      return [...others, snapshot];
+    });
+    setPresetName('');
+    pushToast('ok', 'Preset saved.');
+  };
+
+  const deletePreset = (name) => {
+    setPresets((list) => list.filter((x) => x.name !== name));
+    pushToast('warn', `Deleted preset: ${name}`);
   };
 
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
@@ -710,6 +771,7 @@ if (path === "/settings") {
               )}
             </div>
             <button type="button" className="btn ghost" onClick={exportCSV} title="Download filtered as CSV">Export CSV</button>
+            <button type="button" className="btn ghost" onClick={exportJSON} title="Download filtered as JSON">Export JSON</button>
             <button type="button" className="btn" onClick={resetFilters} title="Clear search, filters and dates">Reset filters</button>
             <select
               className="input"
@@ -727,6 +789,43 @@ if (path === "/settings") {
               <span className="track"><span className="thumb" /></span>
               <span className="muted">Compact</span>
             </label>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                placeholder="Preset name…"
+                value={presetName}
+                onChange={(e)=>setPresetName(e.target.value)}
+                style={{ width: 160 }}
+              />
+              <button type="button" className="btn" onClick={savePreset}>Save preset</button>
+              <select
+                className="input"
+                style={{ width: 180 }}
+                onChange={(e)=>{
+                  const name = e.target.value; if (!name) return;
+                  const p = presets.find(x => x.name === name);
+                  applyPreset(p);
+                  // reset dropdown back to placeholder so user can re-apply same preset later if desired
+                  e.target.selectedIndex = 0;
+                }}
+              >
+                <option value="">Load preset…</option>
+                {presets.sort((a,b)=>a.name.localeCompare(b.name)).map(p => (
+                  <option key={p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={()=>{
+                  const name = prompt('Delete which preset? Enter the exact name:');
+                  if (name) deletePreset(name);
+                }}
+                title="Delete a saved preset by name"
+              >
+                Delete preset
+              </button>
+            </div>
           </div>
         </div>
         <div className="tableWrap" style={{ marginTop: 8 }}>
