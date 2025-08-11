@@ -1,24 +1,5 @@
 {
   "name": "frontend",
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "vite",
-    "build": "ROLLUP_SKIP_NODEJS_NATIVE=1 vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "vue": "^3.2.0"
-  },
-  "devDependencies": {
-    "vite": "^4.0.0"
-  },
-  "engines": {
-    "node": "20.x",
-    "npm": "10.x"
-  }
-}
-{
-  "name": "frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
