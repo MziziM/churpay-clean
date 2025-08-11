@@ -16,11 +16,10 @@ function Toasts({ toasts }) {
   );
 }
 
-// --- Small util: safe JSON ---
+// --- Small util: safe JSON (helps when backend returns HTML errors) ---
 async function safeJson(response) {
   const ct = response.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
-    // Read text to help debugging and avoid JSON parse crashes on HTML error pages
     const text = await response.text();
     throw new Error(
       `Expected JSON but got ${ct || "unknown"}. Status ${response.status}. Body: ${text.slice(
@@ -64,6 +63,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [toasts, setToasts] = useState([]);
   const nextId = useRef(1);
+
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
     []
@@ -73,6 +73,13 @@ export default function App() {
     const id = nextId.current++;
     setToasts((ts) => [...ts, { id, type, msg, title }]);
     setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 3500);
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => pushToast("ok", `Copied: ${text}`))
+      .catch(() => pushToast("err", "Failed to copy"));
   };
 
   const loadHealth = async () => {
@@ -137,9 +144,6 @@ export default function App() {
     }
   };
 
-  
- 
-
   useEffect(() => {
     loadHealth();
     loadPayments();
@@ -158,125 +162,130 @@ export default function App() {
 
   // Render a colored status badge
   const renderStatus = (status) => {
-    const s = String(status || '').toUpperCase();
-    if (s.includes('COMPLETE') || s === 'SUCCESS' || s === 'PAID') {
+    const s = String(status || "").toUpperCase();
+    if (s.includes("COMPLETE") || s === "SUCCESS" || s === "PAID") {
       return <span className="badge badge-ok">Complete</span>;
     }
-    if (s.includes('FAIL') || s.includes('ERROR')) {
+    if (s.includes("FAIL") || s.includes("ERROR")) {
       return <span className="badge badge-err">Failed</span>;
     }
     return <span className="badge badge-warn">Pending</span>;
   };
-// --- Route handling (after hooks to satisfy rules-of-hooks) ---
-const path = typeof window !== "undefined" ? window.location.pathname : "/";
 
-// Developer-only Deck route (gate with env key)
-if (path.startsWith("/deck")) {
-  const deckEnvKey = (import.meta.env.VITE_DECK_KEY || "").trim();
-  const url = new URL(window.location.href);
-  const provided =
-    url.searchParams.get("key") ||
-    localStorage.getItem("churpay_deck_key") ||
-    "";
+  // --- Route handling (after hooks to satisfy rules-of-hooks) ---
+  const path = typeof window !== "undefined" ? window.location.pathname : "/";
 
-  if (url.searchParams.get("key")) {
-    localStorage.setItem("churpay_deck_key", provided);
-    url.searchParams.delete("key");
-    history.replaceState({}, "", url.pathname + url.search);
-  }
+  // Developer-only Deck route (gate with env key)
+  if (path.startsWith("/deck")) {
+    const deckEnvKey = (import.meta.env.VITE_DECK_KEY || "").trim();
+    const url = new URL(window.location.href);
+    const provided =
+      url.searchParams.get("key") ||
+      localStorage.getItem("churpay_deck_key") ||
+      "";
 
-  const isLocal =
-    location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  const allowed = deckEnvKey ? provided === deckEnvKey : isLocal;
+    if (url.searchParams.get("key")) {
+      localStorage.setItem("churpay_deck_key", provided);
+      url.searchParams.delete("key");
+      history.replaceState({}, "", url.pathname + url.search);
+    }
 
-  if (allowed) return <Deck />;
+    const isLocal =
+      location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    const allowed = deckEnvKey ? provided === deckEnvKey : isLocal;
 
-  return (
-    <div className="container">
-      <div className="card">
-        <h1 style={{ marginTop: 0 }}>Not Authorized</h1>
-        <p className="muted">This internal presentation is restricted.</p>
-        <DeckKeyForm
-          expectedKey={deckEnvKey}
-          onUnlock={() => (window.location.href = "/deck")}
-        />
-        <div style={{ marginTop: 8 }}>
-          <a className="btn" href="/">Back to Home</a>
+    if (allowed) return <Deck />;
+
+    return (
+      <div className="container">
+        <div className="card">
+          <h1 style={{ marginTop: 0 }}>Not Authorized</h1>
+          <p className="muted">This internal presentation is restricted.</p>
+          <DeckKeyForm
+            expectedKey={deckEnvKey}
+            onUnlock={() => (window.location.href = "/deck")}
+          />
+          <div style={{ marginTop: 8 }}>
+            <a className="btn" href="/">Back to Home</a>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-if (path.startsWith("/payfast/return")) {
-  return (
-    <div className="container">
-      <div className="card">
-        <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
-        <p>Thanks! Your payment was processed.</p>
-        <a href="/" className="btn">Back to Home</a>
+  if (path.startsWith("/payfast/return")) {
+    return (
+      <div className="container">
+        <div className="card">
+          <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
+          <p>Thanks! Your payment was processed.</p>
+          <a href="/" className="btn">Back to Home</a>
+        </div>
+        <Toasts toasts={toasts} />
       </div>
-      <Toasts toasts={toasts} />
-    </div>
-  );
-}
+    );
+  }
 
-if (path.startsWith("/payfast/cancel")) {
-  return (
-    <div className="container">
-      <div className="card">
-        <h1 style={{ marginTop: 0 }}>Payment cancelled</h1>
-        <p>No charges were made. You can try again anytime.</p>
-        <a href="/" className="btn">Back to Home</a>
+  if (path.startsWith("/payfast/cancel")) {
+    return (
+      <div className="container">
+        <div className="card">
+          <h1 style={{ marginTop: 0 }}>Payment cancelled</h1>
+          <p>No charges were made. You can try again anytime.</p>
+          <a href="/" className="btn">Back to Home</a>
+        </div>
+        <Toasts toasts={toasts} />
       </div>
-      <Toasts toasts={toasts} />
-    </div>
-  );
-}
+    );
+  }
+
   return (
     <div className="container">
       {/* Header */}
       <div className="topbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src="/logo.svg" alt="ChurPay logo" className="logo"
-               onError={(e)=>{ const t=e.currentTarget; if(t.src.endsWith('logo.svg')) t.src='/logo.png'; }} />
-          <div className="brand"><span>Chur</span><span className="pay">Pay</span></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <img
+            src="/logo.svg"
+            alt="ChurPay logo"
+            className="logo"
+            onError={(e) => {
+              const t = e.currentTarget;
+              if (t.src.endsWith("logo.svg")) t.src = "/logo.png";
+            }}
+          />
+          <div className="brand">
+            <span>Chur</span>
+            <span className="pay">Pay</span>
+          </div>
         </div>
         <span className="badge">Sandbox</span>
       </div>
 
       {/* Hero */}
       <div className="hero" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 18, color: "var(--text)" }}>Seamless payments made simple.</div>
-        <div className="points" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <div style={{ fontSize: 18, color: "var(--text)" }}>
+          Seamless payments made simple.
+        </div>
+        <div
+          className="points"
+          style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}
+        >
           <div className="point">Fast checkout via PayFast</div>
           <div className="point">Secure IPN updates</div>
-          <div className="point">Built for churches & NPOs</div>
+          <div className="point">Built for churches &amp; NPOs</div>
         </div>
-      </div>
-
-      {/* Status card */}
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <div className="kv">
-            <span>API base:</span> <strong>{apiBase || "(same-origin)"}</strong>
-          </div>
-          <div className={`status ${health && health.ok ? "ok" : "err"}`}>
-            Health: {health ? (health.ok ? "OK" : "ERROR") : "…"}
-          </div>
-        </div>
-        {!health?.ok && health && (
-          <>
-            <hr className="hr" />
-            <pre className="empty" style={{ whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(health, null, 2)}
-            </pre>
-          </>
-        )}
       </div>
 
       {/* KPIs */}
-      <div className="kpis" style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", marginBottom: 12 }}>
+      <div
+        className="kpis"
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+          marginBottom: 12,
+        }}
+      >
         <div className="kpi">
           <div className="label">Total processed</div>
           <div className="value">{ZAR.format(totalZar)}</div>
@@ -294,7 +303,9 @@ if (path.startsWith("/payfast/cancel")) {
       {/* Payment form */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          <label className="label" htmlFor="amount">Amount (ZAR)</label>
+          <label className="label" htmlFor="amount">
+            Amount (ZAR)
+          </label>
           <input
             id="amount"
             className="input"
@@ -303,10 +314,19 @@ if (path.startsWith("/payfast/cancel")) {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-          <button className="btn btn-primary" onClick={() => startPayment()} disabled={busy}>
+          <button
+            className="btn btn-primary"
+            onClick={() => startPayment()}
+            disabled={busy}
+          >
             {busy ? "Starting…" : "Pay with PayFast (Sandbox)"}
           </button>
-          <button className="btn btn-primary" onClick={() => startPayment(10)} disabled={busy} title="Quick R10 demo">
+          <button
+            className="btn btn-primary"
+            onClick={() => startPayment(10)}
+            disabled={busy}
+            title="Quick R10 demo"
+          >
             Demo R10
           </button>
         </div>
@@ -314,7 +334,10 @@ if (path.startsWith("/payfast/cancel")) {
 
       {/* Payments table */}
       <div className="card">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          className="row"
+          style={{ justifyContent: "space-between", alignItems: "center" }}
+        >
           <h2 style={{ margin: 0 }}>Recent Payments</h2>
           <button className="btn" onClick={loadPayments} disabled={loadingPayments}>
             {loadingPayments ? "Loading…" : "Refresh"}
@@ -337,25 +360,47 @@ if (path.startsWith("/payfast/cancel")) {
                 <>
                   {[1, 2, 3, 4].map((i) => (
                     <tr key={"skeleton-" + i}>
-                      <td><div className="skeleton-block" style={{ width: 32, height: 16 }} /></td>
-                      <td><div className="skeleton-block" style={{ width: 80, height: 16 }} /></td>
-                      <td><div className="skeleton-block" style={{ width: 60, height: 16 }} /></td>
-                      <td><div className="skeleton-block" style={{ width: 56, height: 16 }} /></td>
-                      <td><div className="skeleton-block" style={{ width: 100, height: 16 }} /></td>
+                      <td>
+                        <div className="skeleton-block" style={{ width: 32, height: 16 }} />
+                      </td>
+                      <td>
+                        <div className="skeleton-block" style={{ width: 80, height: 16 }} />
+                      </td>
+                      <td>
+                        <div className="skeleton-block" style={{ width: 60, height: 16 }} />
+                      </td>
+                      <td>
+                        <div className="skeleton-block" style={{ width: 56, height: 16 }} />
+                      </td>
+                      <td>
+                        <div className="skeleton-block" style={{ width: 100, height: 16 }} />
+                      </td>
                     </tr>
                   ))}
                 </>
               ) : payments.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="empty">
-                    No payments yet
+                    No payments yet — try Demo R10
                   </td>
                 </tr>
               ) : (
                 payments.map((p) => (
                   <tr key={p.id}>
                     <td>{p.id}</td>
-                    <td>{p.pf_payment_id || "-"}</td>
+                    <td>
+                      {p.pf_payment_id ? (
+                        <span
+                          style={{ cursor: "pointer", color: "var(--primary)" }}
+                          onClick={() => copyToClipboard(p.pf_payment_id)}
+                          title="Click to copy"
+                        >
+                          {p.pf_payment_id}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                     <td>
                       {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
                     </td>
@@ -367,7 +412,9 @@ if (path.startsWith("/payfast/cancel")) {
             </tbody>
           </table>
         </div>
-        <div className="footer">Data updates after PayFast IPN; refresh after completing a payment.</div>
+        <div className="footer">
+          Data updates after PayFast IPN; refresh after completing a payment.
+        </div>
       </div>
 
       <Toasts toasts={toasts} />
