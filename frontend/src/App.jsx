@@ -75,6 +75,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All"); // All | Paid | Pending | Failed
   const [dateRange, setDateRange] = useState("All");       // All | Today | 7d | 30d
+  const [fromDate, setFromDate] = useState(""); // YYYY-MM-DD
+  const [toDate, setToDate] = useState("");   // YYYY-MM-DD
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -216,6 +218,19 @@ export default function App() {
       }
     }
 
+    // Custom from/to (takes precedence if provided)
+    if (fromDate || toDate) {
+      const fromTs = fromDate ? new Date(fromDate + "T00:00:00").getTime() : null;
+      const toTs = toDate ? new Date(toDate + "T23:59:59").getTime() : null;
+      result = result.filter((p) => {
+        if (!p.created_at) return false;
+        const ts = new Date(p.created_at).getTime();
+        if (fromTs && ts < fromTs) return false;
+        if (toTs && ts > toTs) return false;
+        return true;
+      });
+    }
+
     // Text query
     if (query.trim()) {
       const q = query.trim().toLowerCase();
@@ -234,7 +249,7 @@ export default function App() {
     }
 
     return result;
-  }, [payments, query, statusFilter, dateRange]);
+  }, [payments, query, statusFilter, dateRange, fromDate, toDate]);
 
   const totalFiltered = filteredPayments.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
@@ -242,7 +257,7 @@ export default function App() {
   const startIndex = (currentPage - 1) * pageSize;
   const pagedPayments = filteredPayments.slice(startIndex, startIndex + pageSize);
 
-  useEffect(() => { setPage(1); }, [query, statusFilter, dateRange, pageSize]);
+  useEffect(() => { setPage(1); }, [query, statusFilter, dateRange, pageSize, fromDate, toDate]);
 
   // Amount validation + nice blur formatting
   const numAmount = Number.parseFloat(String(amount).replace(",", "."));
@@ -571,11 +586,33 @@ if (path === "/settings") {
                 key={r}
                 type="button"
                 className={`btn ghost ${dateRange === r ? 'active' : ''}`}
-                onClick={() => setDateRange(r)}
+                onClick={() => { setDateRange(r); setFromDate(""); setToDate(""); }}
               >
                 {r}
               </button>
             ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="date"
+                className="input"
+                value={fromDate}
+                onChange={(e)=>{ setFromDate(e.target.value); setDateRange("All"); }}
+                aria-label="From date"
+                style={{ width: 160 }}
+              />
+              <span className="muted">to</span>
+              <input
+                type="date"
+                className="input"
+                value={toDate}
+                onChange={(e)=>{ setToDate(e.target.value); setDateRange("All"); }}
+                aria-label="To date"
+                style={{ width: 160 }}
+              />
+              {(fromDate || toDate) && (
+                <button type="button" className="btn ghost" onClick={()=>{ setFromDate(""); setToDate(""); }}>Clear dates</button>
+              )}
+            </div>
             <button type="button" className="btn ghost" onClick={exportCSV} title="Download filtered as CSV">Export CSV</button>
             <select
               className="input"
@@ -627,12 +664,22 @@ if (path === "/settings") {
                 </>
               ) : payments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="empty">
-                    No payments yet — try a quick demo.
-                    <div style={{ marginTop: 8 }}>
-                      <button className="btn btn-primary" onClick={() => startPayment(10)}>
-                        Demo R10
-                      </button>
+                  <td colSpan={5} className="empty" style={{ textAlign: 'left' }}>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      <div>
+                        <h3 style={{ margin: 0 }}>Welcome to ChurPay 👋</h3>
+                        <div className="muted" style={{ marginTop: 4 }}>Here’s how to see payments appear:</div>
+                      </div>
+                      <ol style={{ paddingLeft: 18, margin: 0, display: 'grid', gap: 6 }}>
+                        <li>Use the amount box above and click <strong>Pay with PayFast</strong> (Sandbox).</li>
+                        <li>Complete the PayFast flow; you’ll return here automatically.</li>
+                        <li>Click <strong>Refresh</strong> to load the updated list.</li>
+                      </ol>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button className="btn btn-primary" onClick={() => startPayment(10)}>Try Demo R10</button>
+                        <a className="btn" href="/login" title="Admin only">Admin Login</a>
+                      </div>
+                      <div className="muted">Tip: use the filters above to search or narrow by status/date.</div>
                     </div>
                   </td>
                 </tr>
