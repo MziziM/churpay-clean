@@ -5,6 +5,7 @@ import Login from "./pages/Login.jsx";
 import Admin from "./pages/Admin.jsx";
 import Settings from "./pages/Settings.jsx";
 import { isAuthed } from "./auth.js";
+import { Navigate } from "react-router-dom";
 
 // --- Toasts UI (aria-live for accessibility) ---
 function Toasts({ toasts }) {
