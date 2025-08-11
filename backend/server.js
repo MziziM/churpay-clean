@@ -23,16 +23,29 @@ if (DATABASE_URL) {
   });
   (async () => {
     try {
+      // Create payments table with all relevant columns
       await pool.query(`
         CREATE TABLE IF NOT EXISTS payments (
           id SERIAL PRIMARY KEY,
-          pf_payment_id TEXT,
+          pf_payment_id TEXT UNIQUE,
           amount NUMERIC(12,2),
           status TEXT,
+          merchant_reference TEXT,
+          payer_email TEXT,
+          payer_name TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
-      console.log("[DB] payments table ready");
+      // Create ipn_events table for raw IPN logs
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS ipn_events (
+          id SERIAL PRIMARY KEY,
+          pf_payment_id TEXT,
+          raw JSONB,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      console.log("[DB] payments and ipn_events tables ready");
     } catch (err) {
       console.error("[DB] init error", err);
     }
@@ -53,7 +66,7 @@ app.get("/api/payments", async (_req, res) => {
       return res.status(200).json([]);
     }
     const { rows } = await pool.query(
-      `SELECT id, pf_payment_id, amount::float8 AS amount, status, created_at
+      `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, created_at
        FROM payments
        ORDER BY created_at DESC
        LIMIT 100`
@@ -65,36 +78,37 @@ app.get("/api/payments", async (_req, res) => {
   }
 });
 
-// PayFast helpers
-const toSignatureString = (obj) => {
-  // PHP urlencode compatibility (spaces => '+', encode ! * ( ) ~)
-  const phpEncode = (val) => {
-    const s = String(val ?? "");
-    return encodeURIComponent(s)
-      .replace(/%20/g, "+")
-      .replace(/!/g, "%21")
-      .replace(/\*/g, "%2A")
-      .replace(/\(/g, "%28")
-      .replace(/\)/g, "%29")
-      .replace(/~/g, "%7E");
-  };
 
+// --- PayFast signature helpers ---
+function phpUrlEncode(val) {
+  // PHP urlencode compatibility (spaces => '+', encode ! * ( ) ~)
+  const s = String(val ?? "");
+  return encodeURIComponent(s)
+    .replace(/%20/g, "+")
+    .replace(/!/g, "%21")
+    .replace(/\*/g, "%2A")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29")
+    .replace(/~/g, "%7E");
+}
+function signatureBase(obj, passphrase) {
   // Remove empty values and sort keys ascending
   const entries = Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== "");
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  let base = entries.map(([k, v]) => `${k}=${phpUrlEncode(v)}`).join("&");
+  if (passphrase) base += `&passphrase=${passphrase}`;
+  return base;
+}
+function md5hex(str) {
+  return crypto.createHash("md5").update(str).digest("hex");
+}
 
-  // Build query string in insertion order using PHP-style encoding
-  return entries.map(([k, v]) => `${k}=${phpEncode(v)}`).join("&");
-};
-
+// Backward compatibility for existing sign/toSignatureString usages
+const toSignatureString = (obj) => signatureBase(obj, "");
 const sign = (params) => {
   const passphrase = process.env.PAYFAST_PASSPHRASE || "";
-  let base = toSignatureString(params);
-  if (passphrase) {
-    // Append passphrase exactly as provided (no encoding) — some PayFast setups expect this
-    base += `&passphrase=${passphrase}`;
-  }
-  const sig = crypto.createHash("md5").update(base).digest("hex");
+  const base = signatureBase(params, passphrase);
+  const sig = md5hex(base);
   console.log("[PayFast][Sign] Base:", base, " Sig:", sig);
   return sig;
 };
@@ -138,24 +152,60 @@ app.post("/api/payfast/initiate", (req, res) => {
 
 app.post("/api/payfast/ipn", async (req, res) => {
   try {
+    // Extract signature and params
     const { signature: receivedSig, ...params } = req.body || {};
-    const computed = sign(params);
-    if (!receivedSig || receivedSig.toLowerCase() !== computed.toLowerCase()) {
-      console.warn("[PayFast][IPN] Signature mismatch", { receivedSig, computed });
-    } else {
+    const passphrase = process.env.PAYFAST_PASSPHRASE || "";
+    // Compute base string and signature
+    const base = signatureBase(params, passphrase);
+    const computed = md5hex(base);
+    let verified = false;
+    if (receivedSig && receivedSig.toLowerCase() === computed.toLowerCase()) {
+      verified = true;
       console.log("[PayFast][IPN] Signature verified");
-      // Attempt to persist payment to DB (best-effort)
-      if (pool) {
+    } else {
+      console.warn("[PayFast][IPN] Signature mismatch", { receivedSig, computed });
+    }
+    // Save raw IPN event to ipn_events (best-effort)
+    if (pool) {
+      try {
+        const pfId = params.pf_payment_id || null;
+        await pool.query(
+          `INSERT INTO ipn_events (pf_payment_id, raw) VALUES ($1, $2)`,
+          [pfId, JSON.stringify(req.body || {})]
+        );
+      } catch (e) {
+        console.error("[IPN] DB ipn_events insert error", e);
+      }
+      // Upsert into payments if signature verified
+      if (verified) {
         try {
           const pfId = params.pf_payment_id || null;
           const status = String(params.payment_status || "UNKNOWN");
           const amt = Number(params.amount_gross || params.amount || 0);
+          const merchant_reference = params.merchant_reference || null;
+          const payer_email = params.email_address || params.payer_email || null;
+          const payer_name = params.name_first || params.payer_name || null;
           await pool.query(
-            `INSERT INTO payments (pf_payment_id, amount, status) VALUES ($1, $2, $3)`,
-            [pfId, isFinite(amt) ? amt : 0, status]
+            `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (pf_payment_id) DO UPDATE
+             SET amount = EXCLUDED.amount,
+                 status = EXCLUDED.status,
+                 merchant_reference = EXCLUDED.merchant_reference,
+                 payer_email = EXCLUDED.payer_email,
+                 payer_name = EXCLUDED.payer_name
+            `,
+            [
+              pfId,
+              isFinite(amt) ? amt : 0,
+              status,
+              merchant_reference,
+              payer_email,
+              payer_name,
+            ]
           );
         } catch (e) {
-          console.error("[IPN] DB insert error", e);
+          console.error("[IPN] payments upsert error", e);
         }
       }
     }
