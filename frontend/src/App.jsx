@@ -82,6 +82,8 @@ export default function App() {
   const [detail, setDetail] = useState(null); // selected payment for detail modal
   const [usedLocalFallback, setUsedLocalFallback] = useState(false);
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null); // string | null
+  const [sortBy, setSortBy] = useState("created_at"); // id | pf_payment_id | amount | status | created_at
+  const [sortDir, setSortDir] = useState("desc");      // asc | desc
 
   // Escape-to-close for the modal
   useEffect(() => {
@@ -220,6 +222,28 @@ export default function App() {
     ? new Date(payments[0].created_at).toLocaleString()
     : "—";
 
+  // --- Sort helper ---
+  const sortRows = (rows, by, dir) => {
+    const mul = dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const A = a?.[by];
+      const B = b?.[by];
+      if (by === "amount") {
+        const nA = typeof A === "number" ? A : Number(A) || 0;
+        const nB = typeof B === "number" ? B : Number(B) || 0;
+        return (nA - nB) * mul;
+      }
+      if (by === "created_at") {
+        const tA = A ? new Date(A).getTime() : 0;
+        const tB = B ? new Date(B).getTime() : 0;
+        return (tA - tB) * mul;
+      }
+      const sA = String(A ?? "");
+      const sB = String(B ?? "");
+      return sA.localeCompare(sB) * mul;
+    });
+  };
+
   // --- Search + Quick Filters + Date Range for Payments Table ---
   const filteredPayments = useMemo(() => {
     let result = payments;
@@ -279,8 +303,8 @@ export default function App() {
       });
     }
 
-    return result;
-  }, [payments, query, statusFilter, dateRange, fromDate, toDate]);
+    return sortRows(result, sortBy, sortDir);
+  }, [payments, query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir]);
 
   const totalFiltered = filteredPayments.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
@@ -686,11 +710,46 @@ if (path === "/settings") {
           <table className="table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>PF Payment ID</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>
+                  <button className="th-sort" onClick={() => {
+                    setSortBy("id");
+                    setSortDir(d => (sortBy === "id" ? (d === "asc" ? "desc" : "asc") : "asc"));
+                  }}>
+                    ID {sortBy === "id" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </button>
+                </th>
+                <th>
+                  <button className="th-sort" onClick={() => {
+                    setSortBy("pf_payment_id");
+                    setSortDir(d => (sortBy === "pf_payment_id" ? (d === "asc" ? "desc" : "asc") : "asc"));
+                  }}>
+                    PF Payment ID {sortBy === "pf_payment_id" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </button>
+                </th>
+                <th>
+                  <button className="th-sort" onClick={() => {
+                    setSortBy("amount");
+                    setSortDir(d => (sortBy === "amount" ? (d === "asc" ? "desc" : "asc") : "asc"));
+                  }}>
+                    Amount {sortBy === "amount" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </button>
+                </th>
+                <th>
+                  <button className="th-sort" onClick={() => {
+                    setSortBy("status");
+                    setSortDir(d => (sortBy === "status" ? (d === "asc" ? "desc" : "asc") : "asc"));
+                  }}>
+                    Status {sortBy === "status" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </button>
+                </th>
+                <th>
+                  <button className="th-sort" onClick={() => {
+                    setSortBy("created_at");
+                    setSortDir(d => (sortBy === "created_at" ? (d === "asc" ? "desc" : "asc") : "desc"));
+                  }}>
+                    Created {sortBy === "created_at" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -779,6 +838,18 @@ if (path === "/settings") {
                 ))
               )}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={2} className="muted">Filtered total</td>
+                <td>
+                  {(() => {
+                    const sum = filteredPayments.reduce((acc, p) => acc + (typeof p.amount === "number" ? p.amount : (Number(p.amount) || 0)), 0);
+                    return ZAR.format(sum);
+                  })()}
+                </td>
+                <td colSpan={2} className="muted">{filteredPayments.length} {filteredPayments.length === 1 ? "payment" : "payments"}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
