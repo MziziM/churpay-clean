@@ -143,3 +143,4 @@ app.post("/api/payfast/ipn", async (req, res) => {
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log("Backend on", port));
+// deploy-bump 2025-08-11T15:11:41Z
