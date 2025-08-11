@@ -226,15 +226,18 @@ if (path.startsWith("/payfast/cancel")) {
       {/* Header */}
       <div className="header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div className="brand" style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 700 }}>
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: "linear-gradient(135deg,#60a5fa,#22c55e)",
-            }}
-          />
-        <div>Churpay</div>
+          <picture>
+            <source srcSet="/logo.svg" type="image/svg+xml" />
+            <img
+              src="/logo.png"
+              alt="ChurPay Logo"
+              style={{ height: 28, width: "auto", display: "block" }}
+            />
+          </picture>
+          <div>
+            <span style={{ color: "#111" }}>Chur</span>
+            <span style={{ color: "#FFD700" }}>Pay</span>
+          </div>
         </div>
         <span className="badge">Sandbox</span>
       </div>
@@ -326,24 +329,45 @@ if (path.startsWith("/payfast/cancel")) {
               </tr>
             </thead>
             <tbody>
-              {payments.length === 0 ? (
+              {loadingPayments && payments.length === 0 ? (
+                // Skeleton loader: 4 rows
+                <>
+                  {[1, 2, 3, 4].map((i) => (
+                    <tr key={"skeleton-" + i}>
+                      <td><div className="skeleton-block" style={{ width: 32, height: 16 }} /></td>
+                      <td><div className="skeleton-block" style={{ width: 80, height: 16 }} /></td>
+                      <td><div className="skeleton-block" style={{ width: 60, height: 16 }} /></td>
+                      <td><div className="skeleton-block" style={{ width: 56, height: 16 }} /></td>
+                      <td><div className="skeleton-block" style={{ width: 100, height: 16 }} /></td>
+                    </tr>
+                  ))}
+                </>
+              ) : payments.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="empty">
-                    {loadingPayments ? "Loading…" : "No payments yet"}
+                    No payments yet
                   </td>
                 </tr>
               ) : (
-                payments.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.id}</td>
-                    <td>{p.pf_payment_id || "-"}</td>
-                    <td>
-                      {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
-                    </td>
-                    <td>{p.status || "-"}</td>
-                    <td>{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
-                  </tr>
-                ))
+                payments.map((p) => {
+                  let badgeClass = "badge";
+                  if (p.status === "Complete") badgeClass += " badge-ok";
+                  else if (p.status === "Pending") badgeClass += " badge-warn";
+                  else if (p.status === "Failed") badgeClass += " badge-err";
+                  return (
+                    <tr key={p.id}>
+                      <td>{p.id}</td>
+                      <td>{p.pf_payment_id || "-"}</td>
+                      <td>
+                        {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
+                      </td>
+                      <td>
+                        <span className={badgeClass}>{p.status || "-"}</span>
+                      </td>
+                      <td>{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
