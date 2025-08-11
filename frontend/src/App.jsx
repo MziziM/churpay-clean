@@ -155,6 +155,18 @@ export default function App() {
   const lastCreated = payments[0]?.created_at
     ? new Date(payments[0].created_at).toLocaleString()
     : "—";
+
+  // Render a colored status badge
+  const renderStatus = (status) => {
+    const s = String(status || '').toUpperCase();
+    if (s.includes('COMPLETE') || s === 'SUCCESS' || s === 'PAID') {
+      return <span className="badge badge-ok">Complete</span>;
+    }
+    if (s.includes('FAIL') || s.includes('ERROR')) {
+      return <span className="badge badge-err">Failed</span>;
+    }
+    return <span className="badge badge-warn">Pending</span>;
+  };
 // --- Route handling (after hooks to satisfy rules-of-hooks) ---
 const path = typeof window !== "undefined" ? window.location.pathname : "/";
 
@@ -224,20 +236,11 @@ if (path.startsWith("/payfast/cancel")) {
   return (
     <div className="container">
       {/* Header */}
-      <div className="header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div className="brand" style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 700 }}>
-          <picture>
-            <source srcSet="/logo.svg" type="image/svg+xml" />
-            <img
-              src="/logo.png"
-              alt="ChurPay Logo"
-              style={{ height: 28, width: "auto", display: "block" }}
-            />
-          </picture>
-          <div>
-            <span style={{ color: "#111" }}>Chur</span>
-            <span style={{ color: "#FFD700" }}>Pay</span>
-          </div>
+      <div className="topbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img src="/logo.svg" alt="ChurPay logo" className="logo"
+               onError={(e)=>{ const t=e.currentTarget; if(t.src.endsWith('logo.svg')) t.src='/logo.png'; }} />
+          <div className="brand"><span>Chur</span><span className="pay">Pay</span></div>
         </div>
         <span className="badge">Sandbox</span>
       </div>
@@ -300,10 +303,10 @@ if (path.startsWith("/payfast/cancel")) {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-          <button className="btn" onClick={() => startPayment()} disabled={busy}>
+          <button className="btn btn-primary" onClick={() => startPayment()} disabled={busy}>
             {busy ? "Starting…" : "Pay with PayFast (Sandbox)"}
           </button>
-          <button className="btn" onClick={() => startPayment(10)} disabled={busy} title="Quick R10 demo">
+          <button className="btn btn-primary" onClick={() => startPayment(10)} disabled={busy} title="Quick R10 demo">
             Demo R10
           </button>
         </div>
@@ -349,25 +352,17 @@ if (path.startsWith("/payfast/cancel")) {
                   </td>
                 </tr>
               ) : (
-                payments.map((p) => {
-                  let badgeClass = "badge";
-                  if (p.status === "Complete") badgeClass += " badge-ok";
-                  else if (p.status === "Pending") badgeClass += " badge-warn";
-                  else if (p.status === "Failed") badgeClass += " badge-err";
-                  return (
-                    <tr key={p.id}>
-                      <td>{p.id}</td>
-                      <td>{p.pf_payment_id || "-"}</td>
-                      <td>
-                        {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
-                      </td>
-                      <td>
-                        <span className={badgeClass}>{p.status || "-"}</span>
-                      </td>
-                      <td>{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
-                    </tr>
-                  );
-                })
+                payments.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.id}</td>
+                    <td>{p.pf_payment_id || "-"}</td>
+                    <td>
+                      {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
+                    </td>
+                    <td>{renderStatus(p.status)}</td>
+                    <td>{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
