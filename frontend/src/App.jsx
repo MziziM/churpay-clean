@@ -404,6 +404,29 @@ export default function App() {
     query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact
   });
 
+  const isSamePreset = (p) => {
+    if (!p) return false;
+    const cur = currentFilterState();
+    return (
+      (p.query ?? '') === cur.query &&
+      (p.statusFilter ?? 'All') === cur.statusFilter &&
+      (p.dateRange ?? 'All') === cur.dateRange &&
+      (p.fromDate ?? '') === cur.fromDate &&
+      (p.toDate ?? '') === cur.toDate &&
+      (p.sortBy ?? 'created_at') === cur.sortBy &&
+      (p.sortDir ?? 'desc') === cur.sortDir &&
+      (p.pageSize ?? 10) === cur.pageSize &&
+      (!!p.compact) === !!cur.compact
+    );
+  };
+
+  const activePreset = useMemo(() => {
+    for (const p of presets) {
+      if (isSamePreset(p)) return p;
+    }
+    return null;
+  }, [presets, query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact]);
+
   const applyPreset = (p) => {
     if (!p) return;
     setQuery(p.query ?? '');
@@ -689,6 +712,11 @@ if (path === "/settings") {
         >
           <h2 style={{ margin: 0 }}>Recent Payments</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: 'wrap' }}>
+            {activePreset && (
+              <span className="badge" title="Current filters match this preset">
+                Preset: {activePreset.name}
+              </span>
+            )}
             {usedLocalFallback && (
               <span className="badge badge-warn" title={cacheUpdatedAt ? `Cache from ${new Date(cacheUpdatedAt).toLocaleString()}` : "Using local data"}>
                 Offline data
