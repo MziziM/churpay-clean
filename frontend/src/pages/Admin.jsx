@@ -8,11 +8,56 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState([]);
   const [err, setErr] = useState("");
+  const LOG_KEY = 'churpay_client_logs';
+  const [logs, setLogs] = useState([]);
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
     []
   );
+
+  const readLogs = () => {
+    try {
+      const raw = localStorage.getItem(LOG_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  };
+  const saveLogs = (arr) => {
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(arr)); } catch {}
+  };
+  const addLog = (entry) => {
+    const e = { ts: new Date().toISOString(), level: entry?.level || 'info', msg: entry?.msg || '', data: entry?.data || null };
+    setLogs((prev) => {
+      const next = [e, ...prev].slice(0, 500); // cap to 500
+      saveLogs(next);
+      return next;
+    });
+  };
+
+  // Expose a global logger so other parts of the app can push logs
+  useEffect(() => {
+    if (!window.churpayLog) {
+      window.churpayLog = (level, msg, data) => {
+        try {
+          const arr = readLogs();
+          const e = { ts: new Date().toISOString(), level: level || 'info', msg: msg || '', data: data || null };
+          const next = [e, ...arr].slice(0, 500);
+          localStorage.setItem(LOG_KEY, JSON.stringify(next));
+          // Notify this tab
+          setLogs(next);
+        } catch {}
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    setLogs(readLogs());
+    const onStorage = (e) => {
+      if (e.key === LOG_KEY) setLogs(readLogs());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   const apiBase = (import.meta.env.VITE_API_URL || "").trim() || "";
 
@@ -88,6 +133,24 @@ export default function Admin() {
     (acc, p) => acc + (typeof p.amount === "number" ? p.amount : Number(p.amount) || 0),
     0
   );
+
+  const clearLogs = () => { saveLogs([]); setLogs([]); };
+  const downloadLogs = () => {
+    const payload = { meta: { exported_at: new Date().toISOString(), count: logs.length }, rows: logs };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `logs_${Date.now()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  const simulateError = () => {
+    try {
+      throw new Error('Simulated error for testing');
+    } catch (e) {
+      window.churpayLog && window.churpayLog('error', e.message, { stack: e.stack });
+    }
+  };
 
   return (
     <div className="container">
@@ -183,8 +246,54 @@ export default function Admin() {
 
       {tab === 'logs' && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Logs</h2>
-          <div className="muted">Coming soon: surface IPN events and backend errors here.</div>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <h2 style={{ margin: 0 }}>Client Logs</h2>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn" onClick={downloadLogs} disabled={logs.length === 0}>Download JSON</button>
+              <button className="btn ghost" onClick={clearLogs} disabled={logs.length === 0}>Clear</button>
+              <button className="btn ghost" onClick={simulateError}>Simulate error</button>
+            </div>
+          </div>
+
+          <div className="tableWrap" style={{ marginTop: 8 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 160 }}>Time</th>
+                  <th style={{ width: 90 }}>Level</th>
+                  <th>Message</th>
+                  <th>Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="empty">No logs yet. Use “Simulate error” or call <code>window.churpayLog(level, msg, data)</code>.</td>
+                  </tr>
+                ) : (
+                  logs.map((e, i) => (
+                    <tr key={i}>
+                      <td>{new Date(e.ts).toLocaleString()}</td>
+                      <td>
+                        <span className={`badge ${e.level === 'error' ? 'badge-err' : e.level === 'warn' ? 'badge-warn' : 'badge-ok'}`}>
+                          {e.level.toUpperCase()}
+                        </span>
+                      </td>
+                      <td>{e.msg || '—'}</td>
+                      <td>
+                        {e.data ? (
+                          <details>
+                            <summary>view</summary>
+                            <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e.data, null, 2)}</pre>
+                          </details>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
