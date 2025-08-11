@@ -67,16 +67,39 @@ app.get("/api/payments", async (_req, res) => {
 
 // PayFast helpers
 const toSignatureString = (obj) => {
+  // PHP urlencode compatibility (spaces => '+', encode ! * ( ) ~)
+  const phpEncode = (val) => {
+    const s = String(val ?? "");
+    return encodeURIComponent(s)
+      .replace(/%20/g, "+")
+      .replace(/!/g, "%21")
+      .replace(/\*/g, "%2A")
+      .replace(/\(/g, "%28")
+      .replace(/\)/g, "%29")
+      .replace(/~/g, "%7E");
+  };
+
+  // Remove empty values and sort keys ascending
   const entries = Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== "");
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const sortedObj = {};
-  for (const [k, v] of entries) sortedObj[k] = v;
-  return qs.stringify(sortedObj, { encode: true, format: "RFC3986" });
+
+  // Build query string in insertion order using PHP-style encoding
+  return entries.map(([k, v]) => `${k}=${phpEncode(v)}`).join("&");
 };
 
 const sign = (params) => {
-  const passphrase = process.env.PAYFAST_PASSPHRASE;
-  const base = toSignatureString(params) + (passphrase ? `&passphrase=${passphrase}` : "");
+  const passphrase = process.env.PAYFAST_PASSPHRASE || "";
+  let base = toSignatureString(params);
+  if (passphrase) {
+    const phpEncode = (s) => encodeURIComponent(s)
+      .replace(/%20/g, "+")
+      .replace(/!/g, "%21")
+      .replace(/\*/g, "%2A")
+      .replace(/\(/g, "%28")
+      .replace(/\)/g, "%29")
+      .replace(/~/g, "%7E");
+    base += `&passphrase=${phpEncode(passphrase)}`;
+  }
   const sig = crypto.createHash("md5").update(base).digest("hex");
   console.log("[PayFast][Sign] Base:", base, " Sig:", sig);
   return sig;
