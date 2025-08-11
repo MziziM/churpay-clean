@@ -64,6 +64,8 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const nextId = useRef(1);
 
+  const [copied, setCopied] = useState({});
+
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
     []
@@ -76,9 +78,14 @@ export default function App() {
   };
 
   const copyToClipboard = (text) => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => pushToast("ok", `Copied: ${text}`))
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        pushToast("ok", `Copied: ${text}`);
+        setCopied((c) => ({ ...c, [text]: true }));
+        setTimeout(() => setCopied((c) => {
+          const n = { ...c }; delete n[text]; return n;
+        }), 1500);
+      })
       .catch(() => pushToast("err", "Failed to copy"));
   };
 
@@ -213,18 +220,28 @@ export default function App() {
     );
   }
 
-  if (path.startsWith("/payfast/return")) {
-    return (
-      <div className="container">
-        <div className="card">
-          <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
-          <p>Thanks! Your payment was processed.</p>
-          <a href="/" className="btn">Back to Home</a>
+ if (path.startsWith("/payfast/return")) {
+  useEffect(() => {
+    pushToast("ok", "Payment completed. Hit Refresh to see it listed.", "Success");
+    // OPTIONAL: auto-refresh payments after 5s, then return to home
+    const t = setTimeout(() => {
+      window.location.href = "/?v=" + Date.now();
+    }, 5000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div className="container">
+      <div className="card">
+        <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
+        <p>We’ll refresh your dashboard in a moment so you can see it.</p>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <a href="/" className="btn">Go now</a>
         </div>
-        <Toasts toasts={toasts} />
       </div>
-    );
-  }
+      <Toasts toasts={toasts} />
+    </div>
+  );
+}
 
   if (path.startsWith("/payfast/cancel")) {
     return (
@@ -238,7 +255,21 @@ export default function App() {
       </div>
     );
   }
-
+if (path.startsWith("/payfast/cancel")) {
+  useEffect(() => {
+    pushToast("warn", "Payment cancelled. No charges made.", "Heads-up");
+  }, []);
+  return (
+    <div className="container">
+      <div className="card">
+        <h1 style={{ marginTop: 0 }}>Payment cancelled</h1>
+        <p>No charges were made. You can try again anytime.</p>
+        <a href="/" className="btn">Back to Home</a>
+      </div>
+      <Toasts toasts={toasts} />
+    </div>
+  );
+}
   return (
     <div className="container">
       {/* Header */}
@@ -360,19 +391,19 @@ export default function App() {
                 <>
                   {[1, 2, 3, 4].map((i) => (
                     <tr key={"skeleton-" + i}>
-                      <td>
+                      <td data-label="ID">
                         <div className="skeleton-block" style={{ width: 32, height: 16 }} />
                       </td>
-                      <td>
+                      <td data-label="PF Payment ID">
                         <div className="skeleton-block" style={{ width: 80, height: 16 }} />
                       </td>
-                      <td>
+                      <td data-label="Amount">
                         <div className="skeleton-block" style={{ width: 60, height: 16 }} />
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <div className="skeleton-block" style={{ width: 56, height: 16 }} />
                       </td>
-                      <td>
+                      <td data-label="Created">
                         <div className="skeleton-block" style={{ width: 100, height: 16 }} />
                       </td>
                     </tr>
@@ -380,39 +411,38 @@ export default function App() {
                 </>
               ) : payments.length === 0 ? (
                 <tr>
-                  <tr>
-  <td colSpan={5} className="empty">
-    No payments yet — try a quick demo.
-    <div style={{ marginTop: 8 }}>
-      <button className="btn btn-primary" onClick={() => startPayment(10)}>
-        Demo R10
-      </button>
-    </div>
-  </td>
-</tr>
+                  <td colSpan={5} className="empty">
+                    No payments yet — try a quick demo.
+                    <div style={{ marginTop: 8 }}>
+                      <button className="btn btn-primary" onClick={() => startPayment(10)}>
+                        Demo R10
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ) : (
                 payments.map((p) => (
                   <tr key={p.id}>
-                    <td>{p.id}</td>
-                    <td>
+                    <td data-label="ID">{p.id}</td>
+                    <td data-label="PF Payment ID">
                       {p.pf_payment_id ? (
                         <span
-                          style={{ cursor: "pointer", color: "var(--primary)" }}
+                          className="copy-id"
                           onClick={() => copyToClipboard(p.pf_payment_id)}
-                          title="Click to copy"
+                          title={copied[p.pf_payment_id] ? "Copied!" : "Click to copy"}
                         >
                           {p.pf_payment_id}
+                          {copied[p.pf_payment_id] && <span className="copied-badge">Copied!</span>}
                         </span>
                       ) : (
                         "-"
                       )}
                     </td>
-                    <td>
+                    <td data-label="Amount">
                       {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
                     </td>
-                    <td>{renderStatus(p.status)}</td>
-                    <td>{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
+                    <td data-label="Status">{renderStatus(p.status)}</td>
+                    <td data-label="Created">{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
                   </tr>
                 ))
               )}
