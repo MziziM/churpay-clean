@@ -68,6 +68,11 @@ export default function App() {
   const [copied, setCopied] = useState({});
   const [lastRefreshAt, setLastRefreshAt] = useState(0); // timestamp of last successful refresh
   const [nowTick, setNowTick] = useState(Date.now());   // re-render every second for "X seconds ago"
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All"); // All | Paid | Pending | Failed
+  const [dateRange, setDateRange] = useState("All");       // All | Today | 7d | 30d
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -178,12 +183,10 @@ export default function App() {
     ? new Date(payments[0].created_at).toLocaleString()
     : "—";
 
-  // --- Search + Quick Filters for Payments Table ---
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-
+  // --- Search + Quick Filters + Date Range for Payments Table ---
   const filteredPayments = useMemo(() => {
     let result = payments;
+
     // Status filter
     if (statusFilter !== "All") {
       result = result.filter((p) => {
@@ -194,35 +197,91 @@ export default function App() {
         return true;
       });
     }
-    // Query filter
+
+    // Date range filter
+    if (dateRange !== "All") {
+      const now = new Date();
+      if (dateRange === "Today") {
+        const todayStr = now.toDateString();
+        result = result.filter((p) => p.created_at && new Date(p.created_at).toDateString() === todayStr);
+      } else {
+        const days = dateRange === "7d" ? 7 : 30;
+        const cutoff = new Date(now);
+        cutoff.setDate(cutoff.getDate() - days);
+        result = result.filter((p) => p.created_at && new Date(p.created_at) >= cutoff);
+      }
+    }
+
+    // Text query
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       result = result.filter((p) => {
+        const idStr = String(p.id ?? "");
+        const pfid = String(p.pf_payment_id ?? "");
+        const amt = typeof p.amount === "number" ? String(p.amount) : String(p.amount ?? "");
+        const s = String(p.status ?? "").toLowerCase();
         return (
-          String(p.pf_payment_id ?? "").toLowerCase().includes(q) ||
-          String(p.amount ?? "").toLowerCase().includes(q) ||
-          String(p.status ?? "").toLowerCase().includes(q) ||
-          String(p.id ?? "").toLowerCase().includes(q)
+          idStr.toLowerCase().includes(q) ||
+          pfid.toLowerCase().includes(q) ||
+          amt.toLowerCase().includes(q) ||
+          s.includes(q)
         );
       });
     }
+
     return result;
-  }, [payments, query, statusFilter]);
+  }, [payments, query, statusFilter, dateRange]);
+
+  const totalFiltered = filteredPayments.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const pagedPayments = filteredPayments.slice(startIndex, startIndex + pageSize);
+
+  useEffect(() => { setPage(1); }, [query, statusFilter, dateRange, pageSize]);
 
   // Amount validation + nice blur formatting
   const numAmount = Number.parseFloat(String(amount).replace(",", "."));
   const amountValid = Number.isFinite(numAmount) && numAmount > 0;
 
-  // Render a colored status badge
+  // Render a colored status badge with icon
   const renderStatus = (status) => {
     const s = String(status || "").toUpperCase();
     if (s.includes("COMPLETE") || s === "SUCCESS" || s === "PAID") {
-      return <span className="badge badge-ok">Complete</span>;
+      return <span className="badge badge-ok">✔︎ Complete</span>;
     }
     if (s.includes("FAIL") || s.includes("ERROR")) {
-      return <span className="badge badge-err">Failed</span>;
+      return <span className="badge badge-err">✖︎ Failed</span>;
     }
-    return <span className="badge badge-warn">Pending</span>;
+    return <span className="badge badge-warn">• Pending</span>;
+  };
+
+  const exportCSV = () => {
+    const headers = ["id", "pf_payment_id", "amount", "status", "created_at"];
+    const escape = (v) => `"${String(v ?? "").replace(/\"/g, '""')}"`;
+    const lines = [headers.join(",")].concat(
+      filteredPayments.map((p) =>
+        [
+          p.id,
+          p.pf_payment_id,
+          typeof p.amount === "number" ? p.amount.toFixed(2) : p.amount,
+          p.status,
+          p.created_at,
+        ]
+          .map(escape)
+          .join(",")
+      )
+    );
+    const csv = lines.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payments_${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
@@ -424,6 +483,13 @@ export default function App() {
             Demo R10
           </button>
         </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {[10, 50, 100, 250].map((v) => (
+            <button key={v} type="button" className="btn ghost" onClick={() => setAmount(v.toFixed(2))}>
+              R{v}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Payments table */}
@@ -457,24 +523,46 @@ export default function App() {
         >
           <input
             className="input"
-            style={{ minWidth: 180 }}
-            type="text"
-            placeholder="Search payments…"
+            placeholder="Search by ID, PF ID, amount, or status…"
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={(e)=>setQuery(e.target.value)}
+            style={{ maxWidth: 320 }}
           />
-          <div style={{ display: "flex", gap: 4 }}>
-            {["All", "Paid", "Pending", "Failed"].map((label) => (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(["All", "Paid", "Pending", "Failed"]).map((label) => (
               <button
                 key={label}
-                className={`btn${statusFilter === label ? " active" : ""}`}
-                style={{ minWidth: 72 }}
                 type="button"
+                className={`btn ghost ${statusFilter === label ? 'active' : ''}`}
                 onClick={() => setStatusFilter(label)}
               >
                 {label}
               </button>
             ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(["All", "Today", "7d", "30d"]).map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`btn ghost ${dateRange === r ? 'active' : ''}`}
+                onClick={() => setDateRange(r)}
+              >
+                {r}
+              </button>
+            ))}
+            <button type="button" className="btn ghost" onClick={exportCSV} title="Download filtered as CSV">Export CSV</button>
+            <select
+              className="input"
+              style={{ width: 120 }}
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value) || 10); }}
+              aria-label="Rows per page"
+            >
+              <option value={10}>10 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+            </select>
           </div>
         </div>
         <div className="tableWrap" style={{ marginTop: 8 }}>
@@ -530,7 +618,7 @@ export default function App() {
                   </td>
                 </tr>
               ) : (
-                filteredPayments.map((p) => (
+                pagedPayments.map((p) => (
                   <tr key={p.id}>
                     <td data-label="ID">{p.id}</td>
                     <td data-label="PF Payment ID">
@@ -561,6 +649,16 @@ export default function App() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+          <div className="muted">Showing {totalFiltered === 0 ? 0 : (startIndex + 1)}–{Math.min(startIndex + pageSize, totalFiltered)} of {totalFiltered}</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn" disabled={currentPage <= 1} onClick={() => setPage(1)}>« First</button>
+            <button className="btn" disabled={currentPage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>‹ Prev</button>
+            <div className="muted">Page {currentPage} / {totalPages}</div>
+            <button className="btn" disabled={currentPage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next ›</button>
+            <button className="btn" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>Last »</button>
+          </div>
         </div>
         <div className="footer">
           Data updates after PayFast IPN; refresh after completing a payment.
