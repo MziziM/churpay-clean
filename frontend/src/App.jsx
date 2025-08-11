@@ -364,6 +364,17 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const resetFilters = () => {
+    setQuery("");
+    setStatusFilter("All");
+    setDateRange("All");
+    setFromDate("");
+    setToDate("");
+    setPage(1);
+    setSortBy("created_at");
+    setSortDir("desc");
+  };
+
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
   // read Settings preferences (brand + hide sandbox) saved in localStorage
@@ -699,6 +710,7 @@ if (path === "/settings") {
               )}
             </div>
             <button type="button" className="btn ghost" onClick={exportCSV} title="Download filtered as CSV">Export CSV</button>
+            <button type="button" className="btn" onClick={resetFilters} title="Clear search, filters and dates">Reset filters</button>
             <select
               className="input"
               style={{ width: 120 }}
