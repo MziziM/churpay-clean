@@ -15,6 +15,12 @@ app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : true }));
 
 app.get("/", (_req, res) => res.json({ message: "Churpay Backend is running" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "backend" }));
+// List recent payments (temporary stub)
+app.get("/api/payments", (_req, res) => {
+  // Return an empty array for now so frontend works without errors
+  res.setHeader("Content-Type", "application/json");
+  return res.status(200).json([]);
+});
 
 // PayFast helpers
 const toSignatureString = (obj) => {
