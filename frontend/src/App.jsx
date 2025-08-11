@@ -80,6 +80,8 @@ export default function App() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [detail, setDetail] = useState(null); // selected payment for detail modal
+  const [usedLocalFallback, setUsedLocalFallback] = useState(false);
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null); // string | null
 
   // Escape-to-close for the modal
   useEffect(() => {
@@ -127,19 +129,39 @@ export default function App() {
   };
 
   const loadPayments = async () => {
+    const pickRows = (j) => (Array.isArray(j) ? j : j?.rows || []);
     try {
       setLoadingPayments(true);
-      const r = await fetch(`${apiBase}/api/payments`);
+      setUsedLocalFallback(false);
+      setCacheUpdatedAt(null);
+
+      // Try live API first
+      const r = await fetch(`${apiBase}/api/payments`, { cache: 'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await safeJson(r);
-      const rows = Array.isArray(j) ? j : j?.rows || [];
-      // Sort newest first based on created_at
+      const rows = pickRows(j);
       rows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       setPayments(rows);
       setLastRefreshAt(Date.now());
       pushToast("ok", `Payments refreshed (${rows.length})`, "Success");
-    } catch {
-      pushToast("err", "Could not load payments.");
+    } catch (e) {
+      // Fallback to local exported JSON
+      try {
+        const r2 = await fetch(`/data/payments.json?ts=${Date.now()}`, { cache: 'no-store' });
+        if (!r2.ok) throw new Error(`Fallback HTTP ${r2.status}`);
+        const j2 = await r2.json();
+        const rows2 = pickRows(j2);
+        rows2.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        setPayments(rows2);
+        setLastRefreshAt(Date.now());
+        setUsedLocalFallback(true);
+        const metaTs = j2?.meta?.updated_at || j2?.updated_at || null;
+        if (metaTs) setCacheUpdatedAt(metaTs);
+        else if (rows2[0]?.created_at) setCacheUpdatedAt(rows2[0].created_at);
+        pushToast("warn", `Loaded ${rows2.length} from local cache.`, "Offline mode");
+      } catch (e2) {
+        pushToast("err", "Could not load payments (API & local cache failed).");
+      }
     } finally {
       setLoadingPayments(false);
     }
@@ -564,11 +586,19 @@ if (path === "/settings") {
           style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}
         >
           <h2 style={{ margin: 0 }}>Recent Payments</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: 'wrap' }}>
+            {usedLocalFallback && (
+              <span className="badge badge-warn" title={cacheUpdatedAt ? `Cache from ${new Date(cacheUpdatedAt).toLocaleString()}` : "Using local data"}>
+                Offline data
+              </span>
+            )}
             {lastAgo != null && (
               <div className="muted" title={lastRefreshAt ? new Date(lastRefreshAt).toLocaleString() : ""}>
                 Last updated {lastAgo}s ago
               </div>
+            )}
+            {usedLocalFallback && cacheUpdatedAt && (
+              <div className="muted">(cache @ {new Date(cacheUpdatedAt).toLocaleString()})</div>
             )}
             <button className="btn" onClick={loadPayments} disabled={loadingPayments}>
               {loadingPayments ? "Loading…" : "Refresh"}
