@@ -128,8 +128,14 @@ app.post("/api/payfast/initiate", (req, res) => {
     notify_url: `${BACKEND_URL}/api/payfast/ipn`,
   };
 
+  // Debug logging for PayFast initiation
+  console.log("[PayFast][Init Params]", pfParams);
+
   const signature = sign(pfParams);
-  const redirectUrl = `${gateway}?${qs.stringify({ ...pfParams, signature }, { encode: true, format: "RFC3986" })}`;
+  const redirectQuery = `${toSignatureString(pfParams)}&signature=${signature}`;
+  console.log("[PayFast][Init RedirectQuery]", redirectQuery);
+  const redirectUrl = `${gateway}?${redirectQuery}`;
+  console.log("[PayFast][Init RedirectURL]", redirectUrl);
   console.log("[PayFast] mode=%s merchant_id=%s gateway=%s amount=%s", mode, merchant_id, gateway, amount);
   return res.json({ redirect: redirectUrl });
 });
