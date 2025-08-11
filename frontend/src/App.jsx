@@ -639,21 +639,30 @@ if (path === "/settings") {
       {/* Header */}
       <div className="topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img
-            src="/logo.svg"
-            alt="ChurPay logo"
-            className="logo"
-            onError={(e) => {
-              const t = e.currentTarget;
-              if (t.src.endsWith("logo.svg")) t.src = "/logo.png";
-            }}
-          />
-          <div className="brand">
-            <span>Chur</span>
-            <span className="pay">Pay</span>
-          </div>
+          <a href="/" style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
+            <img
+              src="/logo.svg"
+              alt="ChurPay logo"
+              className="logo"
+              onError={(e) => {
+                const t = e.currentTarget;
+                if (t.src.endsWith("logo.svg")) t.src = "/logo.png";
+              }}
+            />
+            <div className="brand">
+              <span>Chur</span>
+              <span className="pay">Pay</span>
+            </div>
+          </a>
         </div>
-        {APP_ENV !== "production" && !hideSandboxPref && <span className="badge">Sandbox</span>}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {APP_ENV !== "production" && !hideSandboxPref && (
+            <span className="badge">Sandbox</span>
+          )}
+          <nav className="topnav" aria-label="Main">
+            <a className="btn ghost" href="/admin" title="Open Admin">Admin</a>
+          </nav>
+        </div>
       </div>
 
       {/* Hero */}
