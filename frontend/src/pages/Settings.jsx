@@ -1,115 +1,143 @@
-// frontend/src/pages/Settings.jsx
-import { useEffect, useState } from "react";
-import { isAuthed } from "../auth";
+import { useEffect, useMemo, useState } from "react";
+import "../App.css";
 
-const BRAND_KEY = "churpay_brand";            // CSS color for --brand
-const HIDE_SANDBOX_KEY = "churpay_hide_sandbox"; // boolean "true"/"false"
-
-const PRESETS = [
-  { name: "Blue (Default)", value: "#2563eb" },
-  { name: "Purple", value: "#6d28d9" },
-  { name: "Teal", value: "#0ea5a4" },
-  { name: "Green", value: "#16a34a" },
-  { name: "Crimson", value: "#dc2626" },
-];
+const HIDE_SANDBOX_KEY = "churpay_hide_sandbox";
+const BRAND_KEY = "churpay_brand";
+const PAGE_SIZE_KEY = "churpay_default_page_size";
 
 export default function Settings() {
-  if (!isAuthed()) {
-    window.location.href = "/login";
-    return null;
-  }
+  const [brand, setBrand] = useState("");
+  const [brandText, setBrandText] = useState("");
+  const [hideSandbox, setHideSandbox] = useState(false);
+  const [pageSize, setPageSize] = useState(10);
+  const [notice, setNotice] = useState("");
 
-  const [brand, setBrand] = useState(localStorage.getItem(BRAND_KEY) || "");
-  const [hideSandbox, setHideSandbox] = useState(localStorage.getItem(HIDE_SANDBOX_KEY) === "true");
-
+  // Load saved prefs
   useEffect(() => {
-    // Apply brand color live
-    if (brand) {
-      document.documentElement.style.setProperty("--brand", brand);
-      // derive a darker hover shade (very rough)
-      try {
-        const shade = darken(brand, 0.12);
-        document.documentElement.style.setProperty("--brand-600", shade);
-      } catch {}
-    }
+    try {
+      const b = localStorage.getItem(BRAND_KEY) || "";
+      const h = localStorage.getItem(HIDE_SANDBOX_KEY) === "true";
+      const ps = Number(localStorage.getItem(PAGE_SIZE_KEY) || "10") || 10;
+      setBrand(b);
+      setBrandText(b);
+      setHideSandbox(h);
+      setPageSize(ps);
+      if (b) document.documentElement.style.setProperty("--brand", b); // live preview
+    } catch {}
+  }, []);
+
+  // Keep text field and color in sync when hex is valid
+  useEffect(() => {
+    if (/^#([0-9a-f]{3}){1,2}$/i.test(brandText)) setBrand(brandText);
+  }, [brandText]);
+
+  // Live preview brand when color changes
+  useEffect(() => {
+    if (brand) document.documentElement.style.setProperty("--brand", brand);
   }, [brand]);
 
   const save = () => {
-    localStorage.setItem(BRAND_KEY, brand || "");
-    localStorage.setItem(HIDE_SANDBOX_KEY, hideSandbox ? "true" : "false");
-    alert("Settings saved. Refresh the page to ensure all components pick up changes.");
+    try {
+      if (brand) localStorage.setItem(BRAND_KEY, brand);
+      else localStorage.removeItem(BRAND_KEY);
+
+      localStorage.setItem(HIDE_SANDBOX_KEY, hideSandbox ? "true" : "false");
+      localStorage.setItem(PAGE_SIZE_KEY, String(pageSize));
+
+      setNotice("Settings saved. Reloading…");
+      setTimeout(() => { window.location.href = "/?v=" + Date.now(); }, 600);
+    } catch {
+      setNotice("Could not save settings. Check browser privacy settings.");
+    }
   };
 
-  const reset = () => {
-    localStorage.removeItem(BRAND_KEY);
-    localStorage.removeItem(HIDE_SANDBOX_KEY);
-    alert("Settings reset. Refresh the page.");
+  const resetDefaults = () => {
+    try {
+      localStorage.removeItem(BRAND_KEY);
+      localStorage.removeItem(HIDE_SANDBOX_KEY);
+      localStorage.removeItem(PAGE_SIZE_KEY);
+      setNotice("Settings reset. Reloading…");
+      setTimeout(() => { window.location.href = "/?v=" + Date.now(); }, 600);
+    } catch {}
   };
+
+  const brandPreview = useMemo(() => ({
+    width: 20, height: 20, borderRadius: 4,
+    border: '1px solid var(--border)',
+    background: brand || 'var(--brand)',
+  }), [brand]);
 
   return (
     <div className="container">
-      <div className="topbar">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img src="/logo.svg" alt="ChurPay logo" className="logo"
-            onError={(e)=>{ if(e.currentTarget.src.endsWith("logo.svg")) e.currentTarget.src="/logo.png"; }}/>
-          <div className="brand"><span>Chur</span><span className="pay">Pay</span></div>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h1 style={{ margin: 0 }}>Settings</h1>
+        <div className="muted" style={{ marginTop: 6 }}>
+          These settings are stored in your browser and apply instantly.
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <a className="btn" href="/admin">Back to Admin</a>
-        </div>
+        {notice && <div className="alert ok" style={{ marginTop: 8 }}>{notice}</div>}
       </div>
 
-      <div className="card" style={{ maxWidth: 720, margin: "0 auto" }}>
-        <h1 style={{ marginTop: 0 }}>Settings</h1>
-
-        <div className="row" style={{ alignItems: "center" }}>
-          <div className="col">
-            <label className="label">Brand color</label>
+      <div className="card" style={{ display: 'grid', gap: 12 }}>
+        <section>
+          <h2 style={{ marginTop: 0 }}>Brand</h2>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={brandPreview} title="Preview" />
+            <input
+              type="color"
+              value={/^#([0-9a-f]{3}){1,2}$/i.test(brand) ? brand : '#6d28d9'}
+              onChange={(e)=>{ setBrand(e.target.value); setBrandText(e.target.value); }}
+              aria-label="Brand color"
+            />
             <input
               className="input"
-              type="text"
-              placeholder="#2563eb"
-              value={brand}
-              onChange={(e)=>setBrand(e.target.value)}
+              placeholder="#6d28d9"
+              value={brandText}
+              onChange={(e)=>setBrandText(e.target.value)}
+              style={{ width: 120 }}
+              aria-label="Brand color hex"
             />
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-              {PRESETS.map(p => (
-                <button key={p.value} className="btn ghost" onClick={()=>setBrand(p.value)}>{p.name}</button>
-              ))}
-              <input type="color" value={brand || "#2563eb"} onChange={(e)=>setBrand(e.target.value)} />
-            </div>
+            <button className="btn ghost" onClick={()=>{ setBrand('#6d28d9'); setBrandText('#6d28d9'); }}>
+              Use default
+            </button>
           </div>
-        </div>
+        </section>
 
-        <div className="row" style={{ marginTop: 12 }}>
-          <label className="label">
+        <section>
+          <h2 style={{ marginTop: 0 }}>Display</h2>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
               checked={hideSandbox}
               onChange={(e)=>setHideSandbox(e.target.checked)}
-              style={{ marginRight: 8 }}
             />
-            Hide “Sandbox” badge on header
+            Hide Sandbox badge in header
           </label>
-        </div>
+        </section>
 
-        <div className="row" style={{ gap: 8, marginTop: 16 }}>
-          <button className="btn btn-primary" onClick={save}>Save</button>
-          <button className="btn" onClick={reset}>Reset</button>
+        <section>
+          <h2 style={{ marginTop: 0 }}>Table defaults</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label className="label" htmlFor="pageSize">Rows per page</label>
+            <select
+              id="pageSize"
+              className="input"
+              value={pageSize}
+              onChange={(e)=>setPageSize(Number(e.target.value)||10)}
+              style={{ width: 120 }}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+        </section>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn" onClick={save}>Save</button>
+          <button className="btn ghost" onClick={resetDefaults}>Reset defaults</button>
+          <a className="btn ghost" href="/">Back</a>
         </div>
       </div>
     </div>
   );
-}
-
-// quick hex darken
-function darken(hex, amount = 0.12) {
-  const c = hex.replace("#","").trim();
-  const n = parseInt(c, 16);
-  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  r = Math.max(0, Math.floor(r * (1 - amount)));
-  g = Math.max(0, Math.floor(g * (1 - amount)));
-  b = Math.max(0, Math.floor(b * (1 - amount)));
-  const toHex = (x) => x.toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
