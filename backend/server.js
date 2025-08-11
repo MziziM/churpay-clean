@@ -6,6 +6,8 @@ import qs from "qs";
 import pkg from "pg";
 const { Pool } = pkg;
 
+
+
 const app = express();
 app.use(morgan("tiny"));
 app.use(express.urlencoded({ extended: false })); // for IPN (form-encoded)
@@ -65,15 +67,19 @@ app.get("/api/payments", async (_req, res) => {
 
 // PayFast helpers
 const toSignatureString = (obj) => {
-  const clean = Object.fromEntries(Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== ""));
-  const sorted = Object.keys(clean).sort().reduce((a, k) => (a[k] = clean[k], a), {});
-  return qs.stringify(sorted, { encode: true }); // RFC3986
+  const entries = Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== "");
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const sortedObj = {};
+  for (const [k, v] of entries) sortedObj[k] = v;
+  return qs.stringify(sortedObj, { encode: true, format: "RFC3986" });
 };
+
 const sign = (params) => {
-  const passphrase = process.env.PAYFAST_PASSPHRASE; // include only if set
+  const passphrase = process.env.PAYFAST_PASSPHRASE;
   const base = toSignatureString(params) + (passphrase ? `&passphrase=${passphrase}` : "");
-  console.log("[PayFast][Sign] Base string:", base);
-  return crypto.createHash("md5").update(base).digest("hex");
+  const sig = crypto.createHash("md5").update(base).digest("hex");
+  console.log("[PayFast][Sign] Base:", base, " Sig:", sig);
+  return sig;
 };
 
 app.post("/api/payfast/initiate", (req, res) => {
@@ -100,7 +106,7 @@ app.post("/api/payfast/initiate", (req, res) => {
   };
 
   const signature = sign(pfParams);
-  const redirectUrl = `${gateway}?${qs.stringify({ ...pfParams, signature }, { encode: true })}`;
+  const redirectUrl = `${gateway}?${qs.stringify({ ...pfParams, signature }, { encode: true, format: "RFC3986" })}`;
   console.log("[PayFast] mode=%s merchant_id=%s gateway=%s amount=%s", mode, merchant_id, gateway, amount);
   return res.json({ redirect: redirectUrl });
 });
