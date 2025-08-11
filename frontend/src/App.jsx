@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import "./App.css";
 import Deck from "./Deck.jsx";
 
-// --- Toasts UI ---
+// --- Toasts UI (aria-live for accessibility) ---
 function Toasts({ toasts }) {
   return (
-    <div className="toast-wrap">
+    <div className="toast-wrap" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.type} show`}>
           {t.title && <div className="title">{t.title}</div>}
@@ -55,6 +55,7 @@ function DeckKeyForm({ expectedKey, onUnlock }) {
 export default function App() {
   // If not provided, default to same-origin
   const apiBase = (import.meta.env.VITE_API_URL || "").trim() || "";
+  const APP_ENV = (import.meta.env.VITE_ENV || "").trim().toLowerCase(); // "production" hides Sandbox badge
 
   const [health, setHealth] = useState(null);
   const [payments, setPayments] = useState([]);
@@ -65,6 +66,8 @@ export default function App() {
   const nextId = useRef(1);
 
   const [copied, setCopied] = useState({});
+  const [lastRefreshAt, setLastRefreshAt] = useState(0); // timestamp of last successful refresh
+  const [nowTick, setNowTick] = useState(Date.now());   // re-render every second for "X seconds ago"
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -113,6 +116,7 @@ export default function App() {
       // Sort newest first based on created_at
       rows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       setPayments(rows);
+      setLastRefreshAt(Date.now());
       pushToast("ok", `Payments refreshed (${rows.length})`, "Success");
     } catch {
       pushToast("err", "Could not load payments.");
@@ -151,11 +155,18 @@ export default function App() {
     }
   };
 
+  // Initial load
   useEffect(() => {
     loadHealth();
     loadPayments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
+
+  // Tick every second to update "Last updated Xs ago"
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // KPIs
   const totalCount = payments.length;
@@ -166,6 +177,10 @@ export default function App() {
   const lastCreated = payments[0]?.created_at
     ? new Date(payments[0].created_at).toLocaleString()
     : "—";
+
+  // Amount validation + nice blur formatting
+  const numAmount = Number.parseFloat(String(amount).replace(",", "."));
+  const amountValid = Number.isFinite(numAmount) && numAmount > 0;
 
   // Render a colored status badge
   const renderStatus = (status) => {
@@ -195,6 +210,24 @@ export default function App() {
       pushToast("warn", "Payment cancelled. No charges made.", "Heads-up");
     }
   }, [path]);
+
+  // Auto-refresh payments every 30s (pause while busy or off main page)
+  useEffect(() => {
+    const t = setInterval(() => {
+      const onMain =
+        !path.startsWith("/payfast/") &&
+        !path.startsWith("/deck");
+      if (onMain && !busy) {
+        loadPayments();
+      }
+    }, 30000);
+    return () => clearInterval(t);
+  }, [busy, path]); // loadPayments is stable enough for this interval use
+
+  // Pretty "last updated Xs ago" string
+  const lastAgo = lastRefreshAt
+    ? Math.max(0, Math.floor((nowTick - lastRefreshAt) / 1000))
+    : null;
 
   // Developer-only Deck route (gate with env key)
   if (path.startsWith("/deck")) {
@@ -239,7 +272,7 @@ export default function App() {
       <div className="container">
         <div className="card">
           <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
-          <p>We’ll refresh your dashboard in a moment so you can see it.</p>
+        <p>We’ll refresh your dashboard in a moment so you can see it.</p>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <a href="/" className="btn">Go now</a>
           </div>
@@ -261,6 +294,7 @@ export default function App() {
       </div>
     );
   }
+
   return (
     <div className="container">
       {/* Header */}
@@ -280,7 +314,7 @@ export default function App() {
             <span className="pay">Pay</span>
           </div>
         </div>
-        <span className="badge">Sandbox</span>
+        {APP_ENV !== "production" && <span className="badge">Sandbox</span>}
       </div>
 
       {/* Hero */}
@@ -335,11 +369,18 @@ export default function App() {
             step="0.01"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
+            onBlur={() => {
+              const n = Number.parseFloat(String(amount).replace(",", "."));
+              if (Number.isFinite(n) && n > 0) setAmount(n.toFixed(2));
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && amountValid && !busy) startPayment();
+            }}
           />
           <button
             className="btn btn-primary"
             onClick={() => startPayment()}
-            disabled={busy}
+            disabled={busy || !amountValid}
           >
             {busy ? "Starting…" : "Pay with PayFast (Sandbox)"}
           </button>
@@ -358,12 +399,19 @@ export default function App() {
       <div className="card">
         <div
           className="row"
-          style={{ justifyContent: "space-between", alignItems: "center" }}
+          style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}
         >
           <h2 style={{ margin: 0 }}>Recent Payments</h2>
-          <button className="btn" onClick={loadPayments} disabled={loadingPayments}>
-            {loadingPayments ? "Loading…" : "Refresh"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {lastAgo != null && (
+              <div className="muted" title={lastRefreshAt ? new Date(lastRefreshAt).toLocaleString() : ""}>
+                Last updated {lastAgo}s ago
+              </div>
+            )}
+            <button className="btn" onClick={loadPayments} disabled={loadingPayments}>
+              {loadingPayments ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         </div>
         <div className="tableWrap" style={{ marginTop: 8 }}>
           <table className="table">
@@ -423,7 +471,9 @@ export default function App() {
                           title={copied[p.pf_payment_id] ? "Copied!" : "Click to copy"}
                         >
                           {p.pf_payment_id}
-                          {copied[p.pf_payment_id] && <span className="copied-badge">Copied!</span>}
+                          {copied[p.pf_payment_id] && (
+                            <span className="copied-badge">Copied!</span>
+                          )}
                         </span>
                       ) : (
                         "-"
@@ -433,7 +483,9 @@ export default function App() {
                       {typeof p.amount === "number" ? ZAR.format(p.amount) : p.amount ?? "-"}
                     </td>
                     <td data-label="Status">{renderStatus(p.status)}</td>
-                    <td data-label="Created">{p.created_at ? new Date(p.created_at).toLocaleString() : "-"}</td>
+                    <td data-label="Created">
+                      {p.created_at ? new Date(p.created_at).toLocaleString() : "-"}
+                    </td>
                   </tr>
                 ))
               )}
