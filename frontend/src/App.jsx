@@ -79,7 +79,8 @@ export default function App() {
   const [fromDate, setFromDate] = useState(""); // YYYY-MM-DD
   const [toDate, setToDate] = useState("");   // YYYY-MM-DD
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const savedPageSize = Number(localStorage.getItem("churpay_default_page_size") || "10") || 10;
+  const [pageSize, setPageSize] = useState(savedPageSize);
   const [detail, setDetail] = useState(null); // selected payment for detail modal
   const [usedLocalFallback, setUsedLocalFallback] = useState(false);
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null); // string | null
@@ -872,7 +873,11 @@ if (path === "/settings") {
               className="input"
               style={{ width: 120 }}
               value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value) || 10); }}
+              onChange={(e) => {
+                const v = Number(e.target.value) || 10;
+                setPageSize(v);
+                try { localStorage.setItem("churpay_default_page_size", String(v)); } catch {}
+              }}
               aria-label="Rows per page"
             >
               <option value={10}>10 / page</option>
