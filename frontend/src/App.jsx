@@ -87,6 +87,11 @@ export default function App() {
   const [compact, setCompact] = useState(() => {
     try { return localStorage.getItem('churpay_compact') === 'true'; } catch { return false; }
   });
+  const [qDebounced, setQDebounced] = useState("");
+useEffect(() => {
+  const t = setTimeout(() => setQDebounced(query), 250);
+  return () => clearTimeout(t);
+}, [query]);
   useEffect(() => {
     try { localStorage.setItem('churpay_compact', compact ? 'true' : 'false'); } catch {}
   }, [compact]);
@@ -106,6 +111,23 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [detail]);
+const searchRef = useRef(null);
+useEffect(() => {
+  const onKey = (e) => {
+    const tag = (e.target?.tagName || '').toLowerCase();
+    const typing = tag === 'input' || tag === 'textarea';
+    if (!typing && e.key === '/') {
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+    if (!typing && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault();
+      if (!loadingPayments) loadPayments();
+    }
+  };
+  window.addEventListener('keydown', onKey);
+  return () => window.removeEventListener('keydown', onKey);
+}, [loadingPayments]);
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -301,32 +323,32 @@ export default function App() {
     }
 
     // Text query
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      result = result.filter((p) => {
-        const idStr = String(p.id ?? "");
-        const pfid = String(p.pf_payment_id ?? "");
-        const amt = typeof p.amount === "number" ? String(p.amount) : String(p.amount ?? "");
-        const s = String(p.status ?? "").toLowerCase();
-        return (
-          idStr.toLowerCase().includes(q) ||
-          pfid.toLowerCase().includes(q) ||
-          amt.toLowerCase().includes(q) ||
-          s.includes(q)
-        );
-      });
-    }
+    // Text query (debounced)
+if (qDebounced.trim()) {
+  const q = qDebounced.trim().toLowerCase();
+  result = result.filter((p) => {
+    const idStr = String(p.id ?? "");
+    const pfid = String(p.pf_payment_id ?? "");
+    const amt = typeof p.amount === "number" ? String(p.amount) : String(p.amount ?? "");
+    const s = String(p.status ?? "").toLowerCase();
+    return (
+      idStr.toLowerCase().includes(q) ||
+      pfid.toLowerCase().includes(q) ||
+      amt.toLowerCase().includes(q) ||
+      s.includes(q)
+    );
+  });
+}
 
     return sortRows(result, sortBy, sortDir);
-  }, [payments, query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir]);
+  }, [payments, qDebounced, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir]);
 
   const totalFiltered = filteredPayments.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
   const currentPage = Math.min(page, totalPages);
   const startIndex = (currentPage - 1) * pageSize;
   const pagedPayments = filteredPayments.slice(startIndex, startIndex + pageSize);
-
-  useEffect(() => { setPage(1); }, [query, statusFilter, dateRange, pageSize, fromDate, toDate]);
+  useEffect(() => { setPage(1); }, [qDebounced, statusFilter, dateRange, pageSize, fromDate, toDate]);
 
   // Amount validation + nice blur formatting
   const numAmount = Number.parseFloat(String(amount).replace(",", "."));
@@ -762,7 +784,7 @@ if (path === "/settings") {
             {usedLocalFallback && cacheUpdatedAt && (
               <div className="muted">(cache @ {new Date(cacheUpdatedAt).toLocaleString()})</div>
             )}
-            <button className="btn" onClick={loadPayments} disabled={loadingPayments}>
+            <button className="btn" onClick={loadPayments} disabled={loadingPayments} aria-busy={loadingPayments ? 'true' : 'false'}>
               {loadingPayments ? "Loading…" : "Refresh"}
             </button>
           </div>
@@ -779,6 +801,7 @@ if (path === "/settings") {
           }}
         >
           <input
+           ref={searchRef}
             className="input"
             placeholder="Search by ID, PF ID, amount, or status…"
             value={query}
@@ -792,6 +815,7 @@ if (path === "/settings") {
                 type="button"
                 className={`btn ghost ${statusFilter === label ? 'active' : ''}`}
                 onClick={() => setStatusFilter(label)}
+                aria-pressed={statusFilter === label}
               >
                 {label}
               </button>
@@ -804,6 +828,7 @@ if (path === "/settings") {
                 type="button"
                 className={`btn ghost ${dateRange === r ? 'active' : ''}`}
                 onClick={() => { setDateRange(r); setFromDate(""); setToDate(""); }}
+                aria-pressed={dateRange === r}
               >
                 {r}
               </button>
@@ -830,8 +855,8 @@ if (path === "/settings") {
                 <button type="button" className="btn ghost" onClick={()=>{ setFromDate(""); setToDate(""); }}>Clear dates</button>
               )}
             </div>
-            <button type="button" className="btn ghost" onClick={exportCSV} title="Download filtered as CSV">Export CSV</button>
-            <button type="button" className="btn ghost" onClick={exportJSON} title="Download filtered as JSON">Export JSON</button>
+            <button type="button" className="btn ghost" onClick={exportCSV} disabled={filteredPayments.length === 0} title="Download filtered as CSV">Export CSV</button>
+<button type="button" className="btn ghost" onClick={exportJSON} disabled={filteredPayments.length === 0} title="Download filtered as JSON">Export JSON</button>
             <button type="button" className="btn" onClick={resetFilters} title="Clear search, filters and dates">Reset filters</button>
             <select
               className="input"
@@ -983,6 +1008,9 @@ if (path === "/settings") {
                 <tr>
                   <td colSpan={5} className="empty">
                     No payments match your filters.
+                    <div style={{ marginTop: 8 }}>
+                      <button className="btn" onClick={resetFilters}>Clear filters</button>
+                    </div>
                   </td>
                 </tr>
               ) : (
