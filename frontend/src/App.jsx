@@ -182,6 +182,20 @@ export default function App() {
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
 
+  // Show toasts for return/cancel routes (and optional auto-redirect)
+  useEffect(() => {
+    if (path.startsWith("/payfast/return")) {
+      pushToast("ok", "Payment completed. Hit Refresh to see it listed.", "Success");
+      const t = setTimeout(() => {
+        window.location.href = "/?v=" + Date.now();
+      }, 5000);
+      return () => clearTimeout(t);
+    }
+    if (path.startsWith("/payfast/cancel")) {
+      pushToast("warn", "Payment cancelled. No charges made.", "Heads-up");
+    }
+  }, [path]);
+
   // Developer-only Deck route (gate with env key)
   if (path.startsWith("/deck")) {
     const deckEnvKey = (import.meta.env.VITE_DECK_KEY || "").trim();
@@ -220,28 +234,20 @@ export default function App() {
     );
   }
 
- if (path.startsWith("/payfast/return")) {
-  useEffect(() => {
-    pushToast("ok", "Payment completed. Hit Refresh to see it listed.", "Success");
-    // OPTIONAL: auto-refresh payments after 5s, then return to home
-    const t = setTimeout(() => {
-      window.location.href = "/?v=" + Date.now();
-    }, 5000);
-    return () => clearTimeout(t);
-  }, []);
-  return (
-    <div className="container">
-      <div className="card">
-        <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
-        <p>We’ll refresh your dashboard in a moment so you can see it.</p>
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <a href="/" className="btn">Go now</a>
+  if (path.startsWith("/payfast/return")) {
+    return (
+      <div className="container">
+        <div className="card">
+          <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
+          <p>We’ll refresh your dashboard in a moment so you can see it.</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <a href="/" className="btn">Go now</a>
+          </div>
         </div>
+        <Toasts toasts={toasts} />
       </div>
-      <Toasts toasts={toasts} />
-    </div>
-  );
-}
+    );
+  }
 
   if (path.startsWith("/payfast/cancel")) {
     return (
@@ -255,21 +261,6 @@ export default function App() {
       </div>
     );
   }
-if (path.startsWith("/payfast/cancel")) {
-  useEffect(() => {
-    pushToast("warn", "Payment cancelled. No charges made.", "Heads-up");
-  }, []);
-  return (
-    <div className="container">
-      <div className="card">
-        <h1 style={{ marginTop: 0 }}>Payment cancelled</h1>
-        <p>No charges were made. You can try again anytime.</p>
-        <a href="/" className="btn">Back to Home</a>
-      </div>
-      <Toasts toasts={toasts} />
-    </div>
-  );
-}
   return (
     <div className="container">
       {/* Header */}
