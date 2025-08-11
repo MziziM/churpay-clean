@@ -91,14 +91,8 @@ const sign = (params) => {
   const passphrase = process.env.PAYFAST_PASSPHRASE || "";
   let base = toSignatureString(params);
   if (passphrase) {
-    const phpEncode = (s) => encodeURIComponent(s)
-      .replace(/%20/g, "+")
-      .replace(/!/g, "%21")
-      .replace(/\*/g, "%2A")
-      .replace(/\(/g, "%28")
-      .replace(/\)/g, "%29")
-      .replace(/~/g, "%7E");
-    base += `&passphrase=${phpEncode(passphrase)}`;
+    // Append passphrase exactly as provided (no encoding) — some PayFast setups expect this
+    base += `&passphrase=${passphrase}`;
   }
   const sig = crypto.createHash("md5").update(base).digest("hex");
   console.log("[PayFast][Sign] Base:", base, " Sig:", sig);
