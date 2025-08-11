@@ -557,11 +557,11 @@ function Modal({ open, onClose, children, title }) {
   );
 }
 if (path === "/admin") {
-  return isAuthed() ? <Admin /> : (window.location.href = "/login", null);
+  return isAuthed() ? <Admin /> : (window.location.href = "/login?reason=auth", null);
 }
 if (path === "/settings") {
   // protect settings
-  return isAuthed() ? <Settings /> : (window.location.href = "/login", null);
+  return isAuthed() ? <Settings /> : (window.location.href = "/login?reason=auth", null);
 }
 
   // Pretty "last updated Xs ago" string
