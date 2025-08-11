@@ -4,37 +4,48 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/churpay-logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Churpay helps churches accept tithes, offerings, and project sponsorships online via PayFast." />
     <title>Churpay — PayFast for Churches</title>
     <style>
-      /* --- existing styles moved here --- */
+      /* Headline + points layout */
       .hero { margin: 8px 0 18px; color: var(--muted); }
       .points { display:grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:10px; }
-      .point { background:#0c1424; border:1px solid var(--border); border-radius:12px; padding:12px; font-size:13px; }
+      .point { background: var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; font-size:13px; }
+
+      /* KPI grid */
       .kpis { display:grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin: 10px 0 6px; }
-      .kpi { background:#0c1424; border:1px solid var(--border); border-radius:14px; padding:14px; }
+      .kpi { background: var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; }
       .kpi .label { color:var(--muted); font-size:12px; }
       .kpi .value { font-size:20px; font-weight:700; margin-top:4px; }
-      tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
-      tbody tr:hover { background: rgba(255,255,255,0.04); }
+
       /* Toasts */
       .toast-wrap{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
-      .toast{min-width:260px;max-width:480px;background:#0c1424;border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 10px 24px rgba(0,0,0,.25);opacity:0;transform:translateY(8px);transition:all .2s ease}
+      .toast{min-width:260px;max-width:480px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 10px 24px rgba(0,0,0,.15);opacity:0;transform:translateY(8px);transition:all .2s ease}
       .toast.show{opacity:1;transform:translateY(0)}
       .toast .title{font-weight:700;margin-bottom:4px}
       .toast.ok{border-color:#164e28}
       .toast.err{border-color:#5f1c1c}
+
+      /* Base tokens for this document */
       :root {
         --bg: #ffffff;
         --text: #1e293b;
         --card: #f8fafc;
         --border: #e2e8f0;
+        --muted: #64748b;
       }
-      body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: system-ui, sans-serif;
-        margin: 0;
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220;
+          --text: #e2e8f0;
+          --card: #0f172a;
+          --border: #1e293b;
+          --muted: #94a3b8;
+        }
       }
+      body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; margin: 0; }
     </style>
   </head>
   <body>

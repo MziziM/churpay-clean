@@ -3,11 +3,41 @@ import cors from "cors";
 import morgan from "morgan";
 import crypto from "crypto";
 import qs from "qs";
+import pkg from "pg";
+const { Pool } = pkg;
 
 const app = express();
 app.use(morgan("tiny"));
 app.use(express.urlencoded({ extended: false })); // for IPN (form-encoded)
 app.use(express.json());
+
+// --- Postgres (Render) optional setup ---
+const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+let pool = null;
+if (DATABASE_URL) {
+  pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DATABASE_URL.includes("render.com") || DATABASE_URL.includes("neon.tech") ? { rejectUnauthorized: false } : false,
+  });
+  (async () => {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS payments (
+          id SERIAL PRIMARY KEY,
+          pf_payment_id TEXT,
+          amount NUMERIC(12,2),
+          status TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      console.log("[DB] payments table ready");
+    } catch (err) {
+      console.error("[DB] init error", err);
+    }
+  })();
+} else {
+  console.warn("[DB] No DATABASE_URL configured — /api/payments will return []");
+}
 
 // CORS
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -15,11 +45,22 @@ app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : true }));
 
 app.get("/", (_req, res) => res.json({ message: "Churpay Backend is running" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "backend" }));
-// List recent payments (temporary stub)
-// Temporary stub: list payments (replace with DB query later)
-app.get("/api/payments", (_req, res) => {
-  res.setHeader("Content-Type", "application/json");
-  return res.status(200).json([]);
+app.get("/api/payments", async (_req, res) => {
+  try {
+    if (!pool) {
+      return res.status(200).json([]);
+    }
+    const { rows } = await pool.query(
+      `SELECT id, pf_payment_id, amount::float8 AS amount, status, created_at
+       FROM payments
+       ORDER BY created_at DESC
+       LIMIT 100`
+    );
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error("[GET /api/payments]", err);
+    return res.status(200).json([]);
+  }
 });
 
 // PayFast helpers
@@ -64,7 +105,7 @@ app.post("/api/payfast/initiate", (req, res) => {
   return res.json({ redirect: redirectUrl });
 });
 
-app.post("/api/payfast/ipn", (req, res) => {
+app.post("/api/payfast/ipn", async (req, res) => {
   try {
     const { signature: receivedSig, ...params } = req.body || {};
     const computed = sign(params);
@@ -72,8 +113,21 @@ app.post("/api/payfast/ipn", (req, res) => {
       console.warn("[PayFast][IPN] Signature mismatch", { receivedSig, computed });
     } else {
       console.log("[PayFast][IPN] Signature verified");
+      // Attempt to persist payment to DB (best-effort)
+      if (pool) {
+        try {
+          const pfId = params.pf_payment_id || null;
+          const status = String(params.payment_status || "UNKNOWN");
+          const amt = Number(params.amount_gross || params.amount || 0);
+          await pool.query(
+            `INSERT INTO payments (pf_payment_id, amount, status) VALUES ($1, $2, $3)`,
+            [pfId, isFinite(amt) ? amt : 0, status]
+          );
+        } catch (e) {
+          console.error("[IPN] DB insert error", e);
+        }
+      }
     }
-    // TODO: insert into DB if you want persistence
     res.status(200).send("OK");
   } catch (e) {
     console.error("[PayFast][IPN] Error:", e);
