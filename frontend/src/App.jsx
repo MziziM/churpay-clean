@@ -713,9 +713,18 @@ if (path === "/settings") {
           <h2 style={{ margin: 0 }}>Recent Payments</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: 'wrap' }}>
             {activePreset && (
-              <span className="badge" title="Current filters match this preset">
-                Preset: {activePreset.name}
-              </span>
+              <>
+                <span className="badge" title="Current filters match this preset">
+                  Preset: {activePreset.name}
+                </span>
+                <button
+                  className="btn ghost"
+                  onClick={resetFilters}
+                  title="Clear current filters and preset"
+                >
+                  Clear preset
+                </button>
+              </>
             )}
             {usedLocalFallback && (
               <span className="badge badge-warn" title={cacheUpdatedAt ? `Cache from ${new Date(cacheUpdatedAt).toLocaleString()}` : "Using local data"}>
