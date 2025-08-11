@@ -1,81 +1,174 @@
-/* Light theme overrides so elements don’t appear black */
+/*
+  Churpay App.css — polished light/dark theme with sane defaults
+  - Light theme is default using CSS variables
+  - Auto dark mode via prefers-color-scheme and a manual `.theme-dark` override
+  - Common UI primitives: buttons, cards, KPI, tables, forms, alerts
+*/
+
 :root {
+  /* Light theme */
   --bg: #ffffff;
   --card: #f8fafc;
   --muted: #475569;
   --text: #0f172a;
   --brand: #2563eb;
+  --brand-600: #1d4ed8;
   --ok: #16a34a;
+  --warn: #f59e0b;
   --err: #dc2626;
   --border: #e2e8f0;
+  --shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+}
+
+/* Dark overrides (automatic) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1220;
+    --card: #0f172a;
+    --muted: #94a3b8;
+    --text: #e2e8f0;
+    --brand: #3b82f6;
+    --brand-600: #2563eb;
+    --ok: #22c55e;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --border: #1e293b;
+    --shadow: 0 6px 24px rgba(2, 6, 23, 0.6);
+  }
+}
+
+/* Dark overrides (manual: add .theme-dark on <html> or <body>) */
+.theme-dark {
+  --bg: #0b1220;
+  --card: #0f172a;
+  --muted: #94a3b8;
+  --text: #e2e8f0;
+  --brand: #3b82f6;
+  --brand-600: #2563eb;
+  --ok: #22c55e;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --border: #1e293b;
+  --shadow: 0 6px 24px rgba(2, 6, 23, 0.6);
 }
 
 html, body, #root { height: 100%; }
+
+* { box-sizing: border-box; }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font: 14px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 24px;
   text-align: left;
 }
 
-/* buttons */
+/* Typography */
+.h1, h1 { font-size: 28px; line-height: 1.2; margin: 0 0 12px; }
+.h2, h2 { font-size: 22px; line-height: 1.25; margin: 16px 0 8px; }
+.h3, h3 { font-size: 18px; line-height: 1.3; margin: 12px 0 6px; }
+small, .muted { color: var(--muted); }
+
+/* Links */
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Layout helpers */
+.container { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+.row { display: flex; gap: 16px; flex-wrap: wrap; }
+.col { flex: 1 1 280px; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+
+/* Buttons */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: var(--brand);
   color: #fff;
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: transform .05s ease, background .2s ease, box-shadow .2s ease;
+  box-shadow: var(--shadow);
 }
-.btn:hover { background: #1d4ed8; }
-.btn[disabled] { opacity: .7; cursor: not-allowed; }
+.btn:hover { background: var(--brand-600); }
+.btn:active { transform: translateY(1px); }
+.btn[disabled] { opacity: .7; cursor: not-allowed; box-shadow: none; }
+.btn.ghost { background: transparent; color: var(--brand); border-color: var(--border); box-shadow: none; }
+.btn.ghost:hover { background: rgba(37, 99, 235, .08); }
 
-/* chips / points */
+/* Chips / points */
 .point {
   background: #f1f5f9;
   color: #1e293b;
   padding: 6px 10px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
+  border: 1px solid var(--border);
 }
 
-/* cards & KPIs */
+/* Cards & KPI */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 16px;
+  box-shadow: var(--shadow);
 }
 .kpi {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px;
   text-align: center;
+  box-shadow: var(--shadow);
 }
-.kpi .value {
-  font-size: 1.4rem;
-  font-weight: 700;
+.kpi .label { color: var(--muted); font-size: 12px; }
+.kpi .value { font-size: 1.5rem; font-weight: 700; color: var(--text); }
+
+/* Tables */
+.table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.table th, .table td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+.table th { font-size: 12px; text-transform: uppercase; letter-spacing: .02em; color: var(--muted); }
+.table tr:last-child td { border-bottom: 0; }
+
+/* Forms */
+.input, input[type="text"], input[type="email"], input[type="password"], input[type="number"], select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
   color: var(--text);
 }
+.theme-dark .input,
+.theme-dark input[type="text"], .theme-dark input[type="email"], .theme-dark input[type="password"], .theme-dark input[type="number"],
+.theme-dark select, .theme-dark textarea,
+@media (prefers-color-scheme: dark) {
+  input[type="text"], input[type="email"], input[type="password"], input[type="number"], select, textarea { background: #0b1220; color: var(--text); }
+}
 
-/* misc from Vite scaffold kept for dev convenience */
-.logo { height: 6em; padding: 1.5em; will-change: filter; transition: filter 300ms; }
-.logo:hover { filter: drop-shadow(0 0 2em #646cffaa); }
-.logo.react:hover { filter: drop-shadow(0 0 2em #61dafbaa); }
-@keyframes logo-spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
-@media (prefers-reduced-motion: no-preference) { a:nth-of-type(2) .logo { animation: logo-spin infinite 20s linear; } }
+.label { display: block; margin: 8px 0 6px; font-weight: 600; }
 
-.read-the-docs { color: #888; }
+/* Alerts */
+.alert { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); }
+.alert.ok { background: rgba(34, 197, 94, .08); color: var(--ok); }
+.alert.warn { background: rgba(245, 158, 11, .12); color: var(--warn); }
+.alert.err { background: rgba(220, 38, 38, .10); color: var(--err); }
+
+/* Badges */
 .badge {
   display: inline-block;
   font-size: 12px;
@@ -85,3 +178,12 @@ body {
   color: #3730a3;
   border: 1px solid var(--border);
 }
+
+/* Misc from Vite scaffold (kept) */
+.logo { height: 6em; padding: 1.5em; will-change: filter; transition: filter 300ms; }
+.logo:hover { filter: drop-shadow(0 0 2em #646cffaa); }
+.logo.react:hover { filter: drop-shadow(0 0 2em #61dafbaa); }
+@keyframes logo-spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+@media (prefers-reduced-motion: no-preference) { a:nth-of-type(2) .logo { animation: logo-spin infinite 20s linear; } }
+
+.read-the-docs { color: #888; }
