@@ -139,8 +139,26 @@ useEffect(() => {
   const pushToast = (type, msg, title) => {
     const id = nextId.current++;
     setToasts((ts) => [...ts, { id, type, msg, title }]);
+    // mirror to client logs
+    const level = type === 'err' ? 'error' : (type === 'warn' ? 'warn' : 'info');
+    try { window.churpayLog && window.churpayLog(level, title ? `${title}: ${msg}` : msg); } catch {}
     setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 3500);
   };
+  useEffect(() => {
+    const onWindowError = (message, source, lineno, colno, error) => {
+      try { window.churpayLog && window.churpayLog('error', 'Uncaught error', { message, source, lineno, colno, stack: error?.stack }); } catch {}
+    };
+    const onUnhandledRejection = (e) => {
+      try { window.churpayLog && window.churpayLog('error', 'Unhandled promise rejection', { reason: e?.reason }); } catch {}
+    };
+    const prev = window.onerror;
+    window.onerror = onWindowError;
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    return () => {
+      window.onerror = prev || null;
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    };
+  }, []);
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
@@ -160,9 +178,11 @@ useEffect(() => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await safeJson(r);
       setHealth(j);
+      try { window.churpayLog && window.churpayLog('info', 'Health check', { ok: !!j?.ok }); } catch {}
       if (j?.ok) pushToast("ok", "API is reachable.", "Health: OK");
       else pushToast("err", "Backend health returned ERROR.", "Health");
     } catch (e) {
+      try { window.churpayLog && window.churpayLog('error', 'Health check failed', { error: String(e?.message || e) }); } catch {}
       setHealth({ ok: false, error: String(e?.message || e) });
       pushToast("err", "Failed to reach backend health.", "Network");
     }
@@ -174,6 +194,7 @@ useEffect(() => {
       setLoadingPayments(true);
       setUsedLocalFallback(false);
       setCacheUpdatedAt(null);
+      try { window.churpayLog && window.churpayLog('info', 'Loading payments…'); } catch {}
 
       // Try live API first
       const r = await fetch(`${apiBase}/api/payments`, { cache: 'no-store' });
@@ -183,6 +204,7 @@ useEffect(() => {
       rows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       setPayments(rows);
       setLastRefreshAt(Date.now());
+      try { window.churpayLog && window.churpayLog('info', 'Loaded payments from API', { count: rows.length }); } catch {}
       pushToast("ok", `Payments refreshed (${rows.length})`, "Success");
     } catch (e) {
       // Fallback to local exported JSON
@@ -198,8 +220,10 @@ useEffect(() => {
         const metaTs = j2?.meta?.updated_at || j2?.updated_at || null;
         if (metaTs) setCacheUpdatedAt(metaTs);
         else if (rows2[0]?.created_at) setCacheUpdatedAt(rows2[0].created_at);
+        try { window.churpayLog && window.churpayLog('warn', 'Loaded payments from local cache', { count: rows2.length, cacheUpdatedAt: j2?.meta?.updated_at || j2?.updated_at || null }); } catch {}
         pushToast("warn", `Loaded ${rows2.length} from local cache.`, "Offline mode");
       } catch (e2) {
+        try { window.churpayLog && window.churpayLog('error', 'Payments load failed (API & cache)', { apiError: String(e?.message || e), cacheError: String(e2?.message || e2) }); } catch {}
         pushToast("err", "Could not load payments (API & local cache failed).");
       }
     } finally {
@@ -224,12 +248,14 @@ useEffect(() => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await safeJson(r);
       if (j.redirect) {
+        try { window.churpayLog && window.churpayLog('info', 'Redirecting to PayFast', { amount: num.toFixed(2) }); } catch {}
         pushToast("ok", `Redirecting to PayFast for ${ZAR.format(num)}…`);
         window.location.href = j.redirect;
       } else {
         pushToast("err", "Failed to start payment.");
       }
     } catch (e) {
+      try { window.churpayLog && window.churpayLog('error', 'startPayment error', { error: String(e?.message || e) }); } catch {}
       console.error("startPayment error", e);
       pushToast("err", "Network error starting payment.");
     } finally {
