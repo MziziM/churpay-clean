@@ -81,6 +81,14 @@ export default function App() {
   const [pageSize, setPageSize] = useState(10);
   const [detail, setDetail] = useState(null); // selected payment for detail modal
 
+  // Escape-to-close for the modal
+  useEffect(() => {
+    if (!detail) return;
+    const onKey = (e) => { if (e.key === 'Escape') setDetail(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detail]);
+
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
     []
@@ -708,7 +716,11 @@ if (path === "/settings") {
                 </tr>
               ) : (
                 pagedPayments.map((p) => (
-                  <tr key={p.id} className="row-click" onClick={() => setDetail(p)}>
+                  <tr key={p.id} className="row-click" onClick={(e) => {
+                    const tag = (e.target.tagName || '').toLowerCase();
+                    if (tag === 'button' || tag === 'a' || tag === 'input') return; // let buttons/links work
+                    setDetail(p);
+                  }}>
                     <td data-label="ID">{p.id}</td>
                     <td data-label="PF Payment ID">
                       {p.pf_payment_id ? (
@@ -759,7 +771,12 @@ if (path === "/settings") {
           <div className="detail-grid">
             <div>
               <span className="label">PF Payment ID</span>
-              <div>{detail.pf_payment_id || "-"}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>{detail.pf_payment_id || "-"}</span>
+                {detail.pf_payment_id && (
+                  <button className="btn ghost" onClick={() => copyToClipboard(detail.pf_payment_id)}>Copy</button>
+                )}
+              </div>
             </div>
             <div>
               <span className="label">Amount</span>
@@ -776,7 +793,10 @@ if (path === "/settings") {
             {detail.merchant_reference && (
               <div>
                 <span className="label">Reference</span>
-                <div>{detail.merchant_reference}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>{detail.merchant_reference}</span>
+                  <button className="btn ghost" onClick={() => copyToClipboard(detail.merchant_reference)}>Copy</button>
+                </div>
               </div>
             )}
             {detail.payer_email && (
