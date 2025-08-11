@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import "./App.css";
 import Deck from "./Deck.jsx";
+import Login from "./pages/Login.jsx";
+import Admin from "./pages/Admin.jsx";
+import Settings from "./pages/Settings.jsx";
+import { isAuthed } from "./auth.js";
 
 // --- Toasts UI (aria-live for accessibility) ---
 function Toasts({ toasts }) {
@@ -286,7 +290,28 @@ export default function App() {
 
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
-
+  // read Settings preferences (brand + hide sandbox) saved in localStorage
+const HIDE_SANDBOX_KEY = "churpay_hide_sandbox";
+const BRAND_KEY = "churpay_brand";
+const hideSandboxPref = localStorage.getItem(HIDE_SANDBOX_KEY) === "true";
+const savedBrand = localStorage.getItem(BRAND_KEY);
+// apply brand live if saved
+useEffect(() => {
+  if (savedBrand) {
+    document.documentElement.style.setProperty("--brand", savedBrand);
+  }
+}, [savedBrand]);
+// ----- Auth routes -----
+if (path === "/login") {
+  return <Login />;
+}
+if (path === "/admin") {
+  return <Admin />;
+}
+if (path === "/settings") {
+  // protect settings
+  return isAuthed() ? <Settings /> : (window.location.href = "/login", null);
+}
   // Show toasts for return/cancel routes (and optional auto-redirect)
   useEffect(() => {
     if (path.startsWith("/payfast/return")) {
@@ -404,7 +429,7 @@ export default function App() {
             <span className="pay">Pay</span>
           </div>
         </div>
-        {APP_ENV !== "production" && <span className="badge">Sandbox</span>}
+        {APP_ENV !== "production" && !hideSandboxPref && <span className="badge">Sandbox</span>}
       </div>
 
       {/* Hero */}
