@@ -249,3 +249,40 @@ textarea:focus {
     background-position: 0 0;
   }
 }
+/* === ChurPay topbar + brand === */
+.topbar{
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 10px 14px; margin-bottom: 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.topbar .logo{ height: 28px; width: auto; padding: 0; filter: none; will-change: auto; transition: none; }
+.brand{ font-weight: 800; letter-spacing: .2px; font-size: 18px; }
+.brand .pay{ color: var(--warn); } /* gold highlight */
+
+/* === Buttons: primary variant used in App.jsx === */
+.btn-primary{ background: var(--brand); color:#fff; border-color: transparent; }
+.btn-primary:hover{ background: var(--brand-600); }
+
+/* === Toasts === */
+.toast-wrap{
+  position: fixed; right: 16px; bottom: 16px; display: grid; gap: 10px;
+  z-index: 1000;
+}
+.toast{
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; box-shadow: var(--shadow); min-width: 220px;
+  opacity: 0; transform: translateY(6px); transition: .2s ease;
+}
+.toast.show{ opacity: 1; transform: translateY(0); }
+.toast .title{ font-weight: 700; margin-bottom: 4px; }
+.toast.ok{ border-color: rgba(34,197,94,.5); }
+.toast.err{ border-color: rgba(220,38,38,.5); }
+
+/* === Table: subtle zebra for readability === */
+.table tr:nth-child(even) td{ background: rgba(0,0,0,.02); }
+@media (prefers-color-scheme: dark){
+  .table tr:nth-child(even) td{ background: rgba(255,255,255,.03); }
+}
