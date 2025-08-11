@@ -317,32 +317,7 @@ useEffect(() => {
     document.documentElement.style.setProperty("--brand", savedBrand);
   }
 }, [savedBrand]);
-// ----- Auth routes -----
-if (path === "/login") {
-  return <Login />;
-}
 
-function Modal({ open, onClose, children, title }) {
-  if (!open) return null;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e)=>e.stopPropagation()}>
-        <div className="modal-head">
-          <h3 style={{ margin: 0 }}>{title || "Details"}</h3>
-          <button className="btn ghost" onClick={onClose}>Close</button>
-        </div>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-if (path === "/admin") {
-  return <Admin />;
-}
-if (path === "/settings") {
-  // protect settings
-  return isAuthed() ? <Settings /> : (window.location.href = "/login", null);
-}
   // Show toasts for return/cancel routes (and optional auto-redirect)
   useEffect(() => {
     if (path.startsWith("/payfast/return")) {
@@ -369,6 +344,32 @@ if (path === "/settings") {
     }, 30000);
     return () => clearInterval(t);
   }, [busy, path]); // loadPayments is stable enough for this interval use
+// ----- Auth routes -----
+if (path === "/login") {
+  return <Login />;
+}
+
+function Modal({ open, onClose, children, title }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e)=>e.stopPropagation()}>
+        <div className="modal-head">
+          <h3 style={{ margin: 0 }}>{title || "Details"}</h3>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+if (path === "/admin") {
+  return <Admin />;
+}
+if (path === "/settings") {
+  // protect settings
+  return isAuthed() ? <Settings /> : (window.location.href = "/login", null);
+}
 
   // Pretty "last updated Xs ago" string
   const lastAgo = lastRefreshAt
