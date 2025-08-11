@@ -333,3 +333,67 @@ textarea:focus {
 
 /* Status filter active look */
 .btn.ghost.active{ background: rgba(37,99,235,.12); border-color: var(--brand); }
+
+/* === Pagination controls === */
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pagination button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 32px;
+}
+
+.pagination button.active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+
+.pagination button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* === Date range picker icon === */
+.date-range-icon {
+  margin-left: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .2s ease;
+}
+.date-range-icon:hover {
+  color: var(--brand);
+}
+/* === Modal / Drawer === */
+.modal-backdrop{
+  position: fixed; inset: 0; background: rgba(2,6,23,.5);
+  display: grid; place-items: center; z-index: 1000;
+}
+.modal{
+  width: min(680px, 92vw);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.modal-head{ display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.modal-body{ padding: 14px; }
+.detail-grid{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+/* Row hover to suggest click */
+.row-click{ cursor: pointer; }
+.row-click:hover td{ background: rgba(37,99,235,.06); }
+@media (prefers-color-scheme: dark){
+  .row-click:hover td{ background: rgba(59,130,246,.08); }
+}

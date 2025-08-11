@@ -79,6 +79,7 @@ export default function App() {
   const [toDate, setToDate] = useState("");   // YYYY-MM-DD
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [detail, setDetail] = useState(null); // selected payment for detail modal
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -319,6 +320,21 @@ useEffect(() => {
 // ----- Auth routes -----
 if (path === "/login") {
   return <Login />;
+}
+
+function Modal({ open, onClose, children, title }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e)=>e.stopPropagation()}>
+        <div className="modal-head">
+          <h3 style={{ margin: 0 }}>{title || "Details"}</h3>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
 }
 if (path === "/admin") {
   return <Admin />;
@@ -691,13 +707,13 @@ if (path === "/settings") {
                 </tr>
               ) : (
                 pagedPayments.map((p) => (
-                  <tr key={p.id}>
+                  <tr key={p.id} className="row-click" onClick={() => setDetail(p)}>
                     <td data-label="ID">{p.id}</td>
                     <td data-label="PF Payment ID">
                       {p.pf_payment_id ? (
                         <span
                           className="copy-id"
-                          onClick={() => copyToClipboard(p.pf_payment_id)}
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard(p.pf_payment_id); }}
                           title={copied[p.pf_payment_id] ? "Copied!" : "Click to copy"}
                         >
                           {p.pf_payment_id}
@@ -737,6 +753,46 @@ if (path === "/settings") {
         </div>
       </div>
 
+      <Modal open={!!detail} onClose={() => setDetail(null)} title={detail ? `Payment #${detail.id}` : ""}>
+        {detail && (
+          <div className="detail-grid">
+            <div>
+              <span className="label">PF Payment ID</span>
+              <div>{detail.pf_payment_id || "-"}</div>
+            </div>
+            <div>
+              <span className="label">Amount</span>
+              <div>{typeof detail.amount === 'number' ? ZAR.format(detail.amount) : (detail.amount ?? '-')}</div>
+            </div>
+            <div>
+              <span className="label">Status</span>
+              <div>{renderStatus(detail.status)}</div>
+            </div>
+            <div>
+              <span className="label">Created</span>
+              <div>{detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
+            </div>
+            {detail.merchant_reference && (
+              <div>
+                <span className="label">Reference</span>
+                <div>{detail.merchant_reference}</div>
+              </div>
+            )}
+            {detail.payer_email && (
+              <div>
+                <span className="label">Payer Email</span>
+                <div>{detail.payer_email}</div>
+              </div>
+            )}
+            {detail.payer_name && (
+              <div>
+                <span className="label">Payer Name</span>
+                <div>{detail.payer_name}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
       <Toasts toasts={toasts} />
     </div>
   );
