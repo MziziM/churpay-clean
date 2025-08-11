@@ -427,6 +427,10 @@ export default function App() {
     return null;
   }, [presets, query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact]);
 
+  const canUpdatePreset = useMemo(() => (
+    activePreset ? !isSamePreset(activePreset) : false
+  ), [activePreset, query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact]);
+
   const applyPreset = (p) => {
     if (!p) return;
     setQuery(p.query ?? '');
@@ -731,7 +735,8 @@ if (path === "/settings") {
                 <button
                   className="btn"
                   onClick={updatePreset}
-                  title="Overwrite this preset with current filters"
+                  disabled={!canUpdatePreset}
+                  title={canUpdatePreset ? "Overwrite this preset with current filters" : "No changes to update"}
                 >
                   Update preset
                 </button>
