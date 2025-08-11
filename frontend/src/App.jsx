@@ -106,7 +106,7 @@ export default function App() {
       // Sort newest first based on created_at
       rows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       setPayments(rows);
-      pushToast("ok", "Payments refreshed.");
+      pushToast("ok", `Payments refreshed (${rows.length})`, "Success");
     } catch {
       pushToast("err", "Could not load payments.");
     } finally {
@@ -380,9 +380,16 @@ export default function App() {
                 </>
               ) : payments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="empty">
-                    No payments yet — try Demo R10
-                  </td>
+                  <tr>
+  <td colSpan={5} className="empty">
+    No payments yet — try a quick demo.
+    <div style={{ marginTop: 8 }}>
+      <button className="btn btn-primary" onClick={() => startPayment(10)}>
+        Demo R10
+      </button>
+    </div>
+  </td>
+</tr>
                 </tr>
               ) : (
                 payments.map((p) => (
