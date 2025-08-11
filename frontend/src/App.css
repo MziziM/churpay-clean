@@ -397,3 +397,39 @@ textarea:focus {
 @media (prefers-color-scheme: dark){
   .row-click:hover td{ background: rgba(59,130,246,.08); }
 }
+/* Sortable table headers */
+.th-sort {
+  all: unset;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+}
+.th-sort:hover { color: var(--text); }
+
+/* Totals row */
+.table tfoot td {
+  border-top: 1px solid var(--border);
+  background: rgba(0,0,0,.02);
+}
+@media (prefers-color-scheme: dark){
+  .table tfoot td { background: rgba(255,255,255,.03); }
+}
+/* === Compact rows option === */
+.table.compact th,
+.table.compact td { padding: 6px 10px; }
+.table.compact { font-size: 13px; }
+
+/* === Toggle switch (for Compact rows) === */
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch .track {
+  width: 38px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card); position: relative; transition: background .2s ease, border-color .2s ease;
+}
+.switch .thumb {
+  position: absolute; top: 50%; left: 2px; transform: translateY(-50%);
+  width: 18px; height: 18px; border-radius: 50%; background: var(--muted);
+  transition: left .18s ease, background .2s ease;
+}
+.switch input:checked + .track { background: rgba(37,99,235,.15); border-color: var(--brand); }
+.switch input:checked + .track .thumb { left: 18px; background: var(--brand); }

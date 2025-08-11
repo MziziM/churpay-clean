@@ -84,6 +84,12 @@ export default function App() {
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null); // string | null
   const [sortBy, setSortBy] = useState("created_at"); // id | pf_payment_id | amount | status | created_at
   const [sortDir, setSortDir] = useState("desc");      // asc | desc
+  const [compact, setCompact] = useState(() => {
+    try { return localStorage.getItem('churpay_compact') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('churpay_compact', compact ? 'true' : 'false'); } catch {}
+  }, [compact]);
 
   // Escape-to-close for the modal
   useEffect(() => {
@@ -704,10 +710,15 @@ if (path === "/settings") {
               <option value={25}>25 / page</option>
               <option value={50}>50 / page</option>
             </select>
+            <label className="switch" title="Compact rows">
+              <input type="checkbox" checked={compact} onChange={(e)=>setCompact(e.target.checked)} />
+              <span className="track"><span className="thumb" /></span>
+              <span className="muted">Compact</span>
+            </label>
           </div>
         </div>
         <div className="tableWrap" style={{ marginTop: 8 }}>
-          <table className="table">
+          <table className={`table ${compact ? 'compact' : ''}`}>
             <thead>
               <tr>
                 <th>
