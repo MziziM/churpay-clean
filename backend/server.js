@@ -116,25 +116,27 @@ app.post("/api/payfast/initiate", (req, res) => {
   const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
   const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
 
-  const amount = Number(req.body.amount || 50).toFixed(2);
+  const amount = (Number(req.body.amount || 50)).toFixed(2);
 
   const pfParams = {
-    merchant_id,
-    merchant_key,
-    amount,
-    item_name: "Churpay Top Up",
-    return_url: `${FRONTEND_URL}/payfast/return`,
-    cancel_url: `${FRONTEND_URL}/payfast/cancel`,
-    notify_url: `${BACKEND_URL}/api/payfast/ipn`,
+    merchant_id: String(merchant_id || "").trim(),
+    merchant_key: String(merchant_key || "").trim(),
+    amount: String(amount).trim(),
+    item_name: String("Churpay Top Up").trim(),
+    return_url: String(`${FRONTEND_URL}/payfast/return`).trim(),
+    cancel_url: String(`${FRONTEND_URL}/payfast/cancel`).trim(),
+    notify_url: String(`${BACKEND_URL}/api/payfast/ipn`).trim(),
   };
 
   // Debug logging for PayFast initiation
   console.log("[PayFast][Init Params]", pfParams);
 
+  // Sign using alphabetically sorted, PHP-encoded values; passphrase is appended only to the base string (not sent as a field)
   const signature = sign(pfParams);
   const redirectQuery = `${toSignatureString(pfParams)}&signature=${signature}`;
-  console.log("[PayFast][Init RedirectQuery]", redirectQuery);
   const redirectUrl = `${gateway}?${redirectQuery}`;
+
+  console.log("[PayFast][Init RedirectQuery]", redirectQuery);
   console.log("[PayFast][Init RedirectURL]", redirectUrl);
   console.log("[PayFast] mode=%s merchant_id=%s gateway=%s amount=%s", mode, merchant_id, gateway, amount);
   return res.json({ redirect: redirectUrl });
