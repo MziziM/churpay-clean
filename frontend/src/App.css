@@ -330,3 +330,6 @@ textarea:focus {
 
 /* Better keyboard focus for buttons */
 .btn:focus-visible{ outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Status filter active look */
+.btn.ghost.active{ background: rgba(37,99,235,.12); border-color: var(--brand); }

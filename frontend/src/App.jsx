@@ -178,6 +178,37 @@ export default function App() {
     ? new Date(payments[0].created_at).toLocaleString()
     : "—";
 
+  // --- Search + Quick Filters for Payments Table ---
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+
+  const filteredPayments = useMemo(() => {
+    let result = payments;
+    // Status filter
+    if (statusFilter !== "All") {
+      result = result.filter((p) => {
+        const s = String(p.status || "").toLowerCase();
+        if (statusFilter === "Paid") return s === "paid" || s === "success" || s.includes("complete");
+        if (statusFilter === "Pending") return s === "pending";
+        if (statusFilter === "Failed") return s.includes("fail") || s.includes("error");
+        return true;
+      });
+    }
+    // Query filter
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      result = result.filter((p) => {
+        return (
+          String(p.pf_payment_id ?? "").toLowerCase().includes(q) ||
+          String(p.amount ?? "").toLowerCase().includes(q) ||
+          String(p.status ?? "").toLowerCase().includes(q) ||
+          String(p.id ?? "").toLowerCase().includes(q)
+        );
+      });
+    }
+    return result;
+  }, [payments, query, statusFilter]);
+
   // Amount validation + nice blur formatting
   const numAmount = Number.parseFloat(String(amount).replace(",", "."));
   const amountValid = Number.isFinite(numAmount) && numAmount > 0;
@@ -413,6 +444,39 @@ export default function App() {
             </button>
           </div>
         </div>
+        {/* --- Filters Toolbar --- */}
+        <div
+          className="row"
+          style={{
+            gap: 8,
+            alignItems: "center",
+            marginTop: 10,
+            marginBottom: 6,
+            flexWrap: "wrap"
+          }}
+        >
+          <input
+            className="input"
+            style={{ minWidth: 180 }}
+            type="text"
+            placeholder="Search payments…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 4 }}>
+            {["All", "Paid", "Pending", "Failed"].map((label) => (
+              <button
+                key={label}
+                className={`btn${statusFilter === label ? " active" : ""}`}
+                style={{ minWidth: 72 }}
+                type="button"
+                onClick={() => setStatusFilter(label)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="tableWrap" style={{ marginTop: 8 }}>
           <table className="table">
             <thead>
@@ -459,8 +523,14 @@ export default function App() {
                     </div>
                   </td>
                 </tr>
+              ) : filteredPayments.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    No payments match your filters.
+                  </td>
+                </tr>
               ) : (
-                payments.map((p) => (
+                filteredPayments.map((p) => (
                   <tr key={p.id}>
                     <td data-label="ID">{p.id}</td>
                     <td data-label="PF Payment ID">
