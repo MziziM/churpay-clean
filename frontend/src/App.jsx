@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import "./App.css";
+import Deck from "./Deck.jsx";
+import Login from "./pages/Login.jsx";
+import Admin from "./pages/Admin.jsx";
+import Settings from "./pages/Settings.jsx";
+import { isAuthed } from "./auth.js";
 function PayfastReturn() {
   useEffect(() => {
     setTimeout(() => {
@@ -7,23 +13,6 @@ function PayfastReturn() {
       } catch {}
     }, 1200);
   }, []);
-{/* Export toolbar */}
-<div className="row" style={{ justifyContent: 'flex-end', gap: 8, margin: '8px 0' }}>
-  <button
-    className="btn ghost"
-    onClick={() => exportCSV(payments)}
-    title="Download CSV of current data"
-  >
-    Export CSV
-  </button>
-  <button
-    className="btn ghost"
-    onClick={() => exportJSON(payments)}
-    title="Download JSON of current data"
-  >
-    Export JSON
-  </button>
-</div>
   return (
     <div className="card" style={{ padding: 16, marginTop: 8 }}>
       <div className="alert ok" style={{ marginBottom: 12 }}>
@@ -64,12 +53,6 @@ function PayfastCancel() {
     </div>
   );
 }
-import "./App.css";
-import Deck from "./Deck.jsx";
-import Login from "./pages/Login.jsx";
-import Admin from "./pages/Admin.jsx";
-import Settings from "./pages/Settings.jsx";
-import { isAuthed } from "./auth.js";
 
 
 // --- Toasts UI (aria-live for accessibility) ---
@@ -196,7 +179,8 @@ export default function App() {
   const [usedLocalFallback, setUsedLocalFallback] = useState(false);
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null); // string | null
   const [sortBy, setSortBy] = useState("created_at"); // id | pf_payment_id | amount | status | created_at
-  const [sortDir, setSortDir] = useState("desc");      // asc | desc
+  const [sortDir, setSortDir] = useState("desc"); 
+  const [exportScope, setExportScope] = useState('filtered'); // 'filtered' | 'all'     // asc | desc
   const [compact, setCompact] = useState(() => {
     try { return localStorage.getItem('churpay_compact') === 'true'; } catch { return false; }
   });
@@ -260,6 +244,11 @@ useEffect(() => {
     if (!typing && (e.key === 'r' || e.key === 'R')) {
       e.preventDefault();
       if (!loadingPayments) loadPayments();
+    }
+    if (!typing && (e.key === 'e' || e.key === 'E')) {
+      e.preventDefault();
+      const rows = getExportRows();
+      if (rows.length) exportCSV(rows);
     }
   };
   window.addEventListener('keydown', onKey);
@@ -587,7 +576,6 @@ useEffect(() => {
       });
     }
 
-    // Text query
     // Text query (debounced)
 if (qDebounced.trim()) {
   const q = qDebounced.trim().toLowerCase();
@@ -631,51 +619,6 @@ if (qDebounced.trim()) {
     return <span className="badge badge-warn">• Pending</span>;
   };
 
-  const exportCSV = () => {
-    const headers = ["id", "pf_payment_id", "amount", "status", "created_at"];
-    const escape = (v) => `"${String(v ?? "").replace(/\"/g, '""')}"`;
-    const lines = [headers.join(",")].concat(
-      filteredPayments.map((p) =>
-        [
-          p.id,
-          p.pf_payment_id,
-          typeof p.amount === "number" ? p.amount.toFixed(2) : p.amount,
-          p.status,
-          p.created_at,
-        ]
-          .map(escape)
-          .join(",")
-      )
-    );
-    const csv = lines.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `payments_${Date.now()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-  const exportJSON = () => {
-    const payload = {
-      meta: {
-        exported_at: new Date().toISOString(),
-        filtered_count: filteredPayments.length,
-      },
-      rows: filteredPayments,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `payments_${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
 
   const resetFilters = () => {
     setQuery("");
@@ -690,6 +633,7 @@ if (qDebounced.trim()) {
   const currentFilterState = () => ({
     query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact
   });
+  const getExportRows = () => (exportScope === 'all' ? payments : filteredPayments);
 
   const isSamePreset = (p) => {
     if (!p) return false;
@@ -1099,23 +1043,25 @@ if (path === "/settings") {
             alignItems: "center",
             marginTop: 10,
             marginBottom: 6,
-            flexWrap: "wrap"
+            flexWrap: "wrap",
           }}
         >
           <input
-           ref={searchRef}
+            ref={searchRef}
             className="input"
-           placeholder="🔎 Search by ID, PF ID, amount, or status…"
+            placeholder="🔎 Search by ID, PF ID, amount, or status…"
             value={query}
-            onChange={(e)=>setQuery(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
             style={{ maxWidth: 320 }}
           />
+
+          {/* Status quick filters */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {(["All", "Paid", "Pending", "Failed"]).map((label) => (
+            {["All", "Paid", "Pending", "Failed"].map((label) => (
               <button
                 key={label}
                 type="button"
-                className={`btn ghost ${statusFilter === label ? 'active' : ''}`}
+                className={`btn ghost ${statusFilter === label ? "active" : ""}`}
                 onClick={() => setStatusFilter(label)}
                 aria-pressed={statusFilter === label}
               >
@@ -1123,24 +1069,34 @@ if (path === "/settings") {
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {(["All", "Today", "7d", "30d"]).map((r) => (
+
+          {/* Date quick filters + custom from/to */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {["All", "Today", "7d", "30d"].map((r) => (
               <button
                 key={r}
                 type="button"
-                className={`btn ghost ${dateRange === r ? 'active' : ''}`}
-                onClick={() => { setDateRange(r); setFromDate(""); setToDate(""); }}
+                className={`btn ghost ${dateRange === r ? "active" : ""}`}
+                onClick={() => {
+                  setDateRange(r);
+                  setFromDate("");
+                  setToDate("");
+                }}
                 aria-pressed={dateRange === r}
               >
                 {r}
               </button>
             ))}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <input
                 type="date"
                 className="input"
                 value={fromDate}
-                onChange={(e)=>{ setFromDate(e.target.value); setDateRange("All"); }}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setDateRange("All");
+                }}
                 aria-label="From date"
                 style={{ width: 160 }}
               />
@@ -1149,78 +1105,146 @@ if (path === "/settings") {
                 type="date"
                 className="input"
                 value={toDate}
-                onChange={(e)=>{ setToDate(e.target.value); setDateRange("All"); }}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setDateRange("All");
+                }}
                 aria-label="To date"
                 style={{ width: 160 }}
               />
               {(fromDate || toDate) && (
-                <button type="button" className="btn ghost" onClick={()=>{ setFromDate(""); setToDate(""); }}>Clear dates</button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                  }}
+                  title="Clear custom dates"
+                >
+                  Clear dates
+                </button>
               )}
             </div>
-            <button type="button" className="btn ghost" onClick={exportCSV} disabled={filteredPayments.length === 0} title="Download filtered as CSV">
-  <span aria-hidden>⬇️</span>&nbsp;Export CSV
-</button>
-<button type="button" className="btn ghost" onClick={exportJSON} disabled={filteredPayments.length === 0} title="Download filtered as JSON">
-  <span aria-hidden>⬇️</span>&nbsp;Export JSON
-</button>
-            <button type="button" className="btn" onClick={resetFilters} title="Clear search, filters and dates">Reset filters</button>
+          </div>
+
+          {/* Export toolbar */}
+          <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <label className="label" htmlFor="export-scope" title="Choose which rows to export">
+              Export
+            </label>
+            <select
+              id="export-scope"
+              className="input"
+              style={{ width: 140 }}
+              value={exportScope}
+              onChange={(e) => setExportScope(e.target.value)}
+              aria-label="Export scope"
+            >
+              <option value="filtered">Filtered</option>
+              <option value="all">All</option>
+            </select>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => exportCSV(getExportRows())}
+              disabled={getExportRows().length === 0}
+              title={exportScope === "all" ? "Download ALL rows as CSV" : "Download FILTERED rows as CSV"}
+            >
+              <span aria-hidden>⬇️</span>&nbsp;Export CSV
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => exportJSON(getExportRows())}
+              disabled={getExportRows().length === 0}
+              title={exportScope === "all" ? "Download ALL rows as JSON" : "Download FILTERED rows as JSON"}
+            >
+              <span aria-hidden>⬇️</span>&nbsp;Export JSON
+            </button>
+          </div>
+
+          {/* Reset + paging + compact toggle */}
+          <button
+            type="button"
+            className="btn"
+            onClick={resetFilters}
+            title="Clear search, filters and dates"
+          >
+            Reset filters
+          </button>
+          <select
+            className="input"
+            style={{ width: 120 }}
+            value={pageSize}
+            onChange={(e) => {
+              const v = Number(e.target.value) || 10;
+              setPageSize(v);
+              try {
+                localStorage.setItem("churpay_default_page_size", String(v));
+              } catch {}
+            }}
+            aria-label="Rows per page"
+          >
+            <option value={10}>10 / page</option>
+            <option value={25}>25 / page</option>
+            <option value={50}>50 / page</option>
+          </select>
+          <label className="switch" title="Compact rows">
+            <input
+              type="checkbox"
+              checked={compact}
+              onChange={(e) => setCompact(e.target.checked)}
+            />
+            <span className="track">
+              <span className="thumb" />
+            </span>
+            <span className="muted">Compact</span>
+          </label>
+
+          {/* Presets */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              className="input"
+              placeholder="Preset name…"
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              style={{ width: 160 }}
+            />
+            <button type="button" className="btn" onClick={savePreset}>
+              Save preset
+            </button>
             <select
               className="input"
-              style={{ width: 120 }}
-              value={pageSize}
+              style={{ width: 180 }}
               onChange={(e) => {
-                const v = Number(e.target.value) || 10;
-                setPageSize(v);
-                try { localStorage.setItem("churpay_default_page_size", String(v)); } catch {}
+                const name = e.target.value;
+                if (!name) return;
+                const p = presets.find((x) => x.name === name);
+                applyPreset(p);
+                e.target.selectedIndex = 0;
               }}
-              aria-label="Rows per page"
             >
-              <option value={10}>10 / page</option>
-              <option value={25}>25 / page</option>
-              <option value={50}>50 / page</option>
-            </select>
-            <label className="switch" title="Compact rows">
-              <input type="checkbox" checked={compact} onChange={(e)=>setCompact(e.target.checked)} />
-              <span className="track"><span className="thumb" /></span>
-              <span className="muted">Compact</span>
-            </label>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input
-                className="input"
-                placeholder="Preset name…"
-                value={presetName}
-                onChange={(e)=>setPresetName(e.target.value)}
-                style={{ width: 160 }}
-              />
-              <button type="button" className="btn" onClick={savePreset}>Save preset</button>
-              <select
-                className="input"
-                style={{ width: 180 }}
-                onChange={(e)=>{
-                  const name = e.target.value; if (!name) return;
-                  const p = presets.find(x => x.name === name);
-                  applyPreset(p);
-                  // reset dropdown back to placeholder so user can re-apply same preset later if desired
-                  e.target.selectedIndex = 0;
-                }}
-              >
-                <option value="">Load preset…</option>
-                {presets.sort((a,b)=>a.name.localeCompare(b.name)).map(p => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
+              <option value="">Load preset…</option>
+              {presets
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
                 ))}
-              </select>
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={()=>{
-                  const name = prompt('Delete which preset? Enter the exact name:');
-                  if (name) deletePreset(name);
-                }}
-                title="Delete a saved preset by name"
-              >
-                Delete preset
-              </button>
-            </div>
+            </select>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                const name = prompt("Delete which preset? Enter the exact name:");
+                if (name) deletePreset(name);
+              }}
+              title="Delete a saved preset by name"
+            >
+              Delete preset
+            </button>
           </div>
         </div>
         <div className="tableWrap" style={{ marginTop: 8 }}>
