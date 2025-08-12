@@ -9,7 +9,6 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
 const app = express();
-
 app.use((req, res, next) => {
   res.header('Vary', 'Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -73,6 +72,76 @@ app.use(morgan("tiny"));
 app.use(express.urlencoded({ extended: false })); // for IPN (form-encoded)
 app.use(express.json());
 app.use(cookieParser());
+// -------------------- Settings API --------------------
+let APP_SETTINGS = {
+  brandColor: process.env.BRAND_COLOR || "#6b4fff",
+  sandboxMode: true,
+};
+
+async function dbEnsureSettingsTable() {
+  if (!pool) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_settings (
+    id INT PRIMARY KEY,
+    brand_color TEXT,
+    sandbox_mode BOOLEAN
+  )`);
+}
+
+async function dbGetSettings() {
+  if (!pool) return null;
+  try {
+    await dbEnsureSettingsTable();
+    const { rows } = await pool.query(
+      "SELECT brand_color, sandbox_mode FROM app_settings WHERE id=1"
+    );
+    if (rows.length)
+      return {
+        brandColor: rows[0].brand_color || "#6b4fff",
+        sandboxMode: !!rows[0].sandbox_mode,
+      };
+    return null;
+  } catch (e) {
+    console.log("[Settings][DB] get error", e.message);
+    return null;
+  }
+}
+
+async function dbSetSettings(brandColor, sandboxMode) {
+  if (!pool) return false;
+  try {
+    await dbEnsureSettingsTable();
+    await pool.query(
+      `INSERT INTO app_settings (id, brand_color, sandbox_mode)
+       VALUES (1, $1, $2)
+       ON CONFLICT (id) DO UPDATE SET brand_color=EXCLUDED.brand_color, sandbox_mode=EXCLUDED.sandbox_mode`,
+      [brandColor, sandboxMode]
+    );
+    return true;
+  } catch (e) {
+    console.log("[Settings][DB] set error", e.message);
+    return false;
+  }
+}
+
+app.get("/api/settings", async (req, res) => {
+  const db = await dbGetSettings();
+  if (db) return res.json(db);
+  return res.json(APP_SETTINGS);
+});
+
+app.post("/api/settings", async (req, res) => {
+  const { brandColor, sandboxMode } = req.body || {};
+  const hexOk =
+    typeof brandColor === "string" &&
+    /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(brandColor);
+  const boolOk = typeof sandboxMode === "boolean";
+  if (!hexOk || !boolOk) return res.status(400).json({ error: "invalid" });
+
+  const ok = await dbSetSettings(brandColor, sandboxMode);
+  if (!ok) APP_SETTINGS = { brandColor, sandboxMode };
+  return res.json({ ok: true });
+});
+// ------------------ end Settings API ------------------
 
 // --- Postgres (Render) optional setup ---
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
@@ -373,10 +442,41 @@ app.post("/api/payfast/initiate", async (req, res) => {
     }
   }
 
-  // Sign and redirect
-  const signature = sign(pfParams);
-  const redirectQuery = `${toSignatureString(pfParams)}&signature=${signature}`;
-  const redirectUrl = `${gateway}?${redirectQuery}`;
+  // Sign and redirect (with optional debug to compare passphrase modes)
+  const passphraseEnv = process.env.PAYFAST_PASSPHRASE || "";
+  const signBoth = String(process.env.PAYFAST_SIGN_BOTH || '').toLowerCase() === 'true';
+
+  const baseWith = signatureBase(pfParams, passphraseEnv);
+  const sigWith = md5hex(baseWith);
+  const urlWith = `${gateway}?${toSignatureString(pfParams)}&signature=${sigWith}`;
+
+  const baseWithout = signatureBase(pfParams, '');
+  const sigWithout = md5hex(baseWithout);
+  const urlWithout = `${gateway}?${toSignatureString(pfParams)}&signature=${sigWithout}`;
+
+  // Prefer the signing mode that matches your PayFast dashboard settings.
+  // Default behavior keeps using the env passphrase (same as before)
+  const redirectUrl = urlWith;
+
+  console.log("[PayFast][Sign][with-pass] Base:", baseWith, " Sig:", sigWith);
+  console.log("[PayFast][Sign][no-pass]  Base:", baseWithout, " Sig:", sigWithout);
+
+  if (signBoth) {
+    console.log("[PayFast][Init RedirectURL][with-pass]", urlWith);
+    console.log("[PayFast][Init RedirectURL][no-pass] ", urlWithout);
+    return res.json({
+      redirect: urlWith,
+      merchant_reference,
+      debug: {
+        with_passphrase: { base: baseWith, signature: sigWith, url: urlWith },
+        without_passphrase: { base: baseWithout, signature: sigWithout, url: urlWithout }
+      }
+    });
+  }
+
+  const redirectQuery = `${toSignatureString(pfParams)}&signature=${sigWith}`;
+  // keep prior logs and response shape
+  const _unused = redirectQuery; // no-op to retain variable referenced in earlier logs if any
 
   console.log("[PayFast][Init Params]", pfParams);
   console.log("[PayFast][Init RedirectURL]", redirectUrl);

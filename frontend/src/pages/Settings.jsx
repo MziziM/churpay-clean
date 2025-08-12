@@ -1,79 +1,86 @@
 import { useEffect, useMemo, useState } from "react";
 
-// Shared keys with App.jsx
-const HIDE_SANDBOX_KEY = "churpay_hide_sandbox";
-const BRAND_KEY = "churpay_brand";
+// Compute backend base URL
+const BACKEND_URL = (import.meta?.env?.VITE_API_URL?.replace(/\/$/, ""))
+  || (typeof window !== "undefined" && window.location.hostname.includes("churpay.com")
+      ? "https://api.churpay.com"
+      : "http://localhost:5000");
 
 export default function Settings() {
-  const [brand, setBrand] = useState(() => {
-    try { return localStorage.getItem(BRAND_KEY) || "#6b4fff"; } catch { return "#6b4fff"; }
-  });
-  const [hideSandbox, setHideSandbox] = useState(() => {
-    try { return localStorage.getItem(HIDE_SANDBOX_KEY) === "true"; } catch { return false; }
-  });
-  const [hex, setHex] = useState(brand);
+  const [brandColor, setBrandColor] = useState("#6b4fff");
+  const [sandboxMode, setSandboxMode] = useState(true);
+  const [hex, setHex] = useState("#6b4fff");
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
-  // live preview brand
+  // Load from backend
   useEffect(() => {
-    try { document.documentElement.style.setProperty("--brand", brand); } catch {}
-    setHex(brand);
-  }, [brand]);
-
-  // persist (debounced)
-  useEffect(() => {
-    const t = setTimeout(() => {
+    (async () => {
       try {
-        localStorage.setItem(BRAND_KEY, brand);
-        localStorage.setItem(HIDE_SANDBOX_KEY, hideSandbox ? "true" : "false");
-        setSavedAt(new Date());
-      } catch {}
-    }, 200);
-    return () => clearTimeout(t);
-  }, [brand, hideSandbox]);
+        const res = await fetch(`${BACKEND_URL}/api/settings`, { credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.brandColor) setBrandColor(data.brandColor);
+        if (typeof data?.sandboxMode === "boolean") setSandboxMode(data.sandboxMode);
+        setHex(data?.brandColor || "#6b4fff");
+        setLoadError(null);
+      } catch (e) {
+        console.warn("[Settings] load failed, using defaults", e);
+        setLoadError("Couldn’t load settings (using defaults)");
+      }
+    })();
+  }, []);
 
-  const validHex = useMemo(
-    () => /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex.trim()),
-    [hex]
-  );
+  // Live apply brand to CSS var
+  useEffect(() => {
+    try { document.documentElement.style.setProperty("--brand", brandColor); } catch {}
+  }, [brandColor]);
 
-  const applyHex = () => {
+  const validHex = useMemo(() => /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex.trim()), [hex]);
+
+  async function save() {
     if (!validHex) return;
-    setBrand(hex.trim());
-  };
-
-  const resetDefault = () => {
-    setBrand("#6b4fff");
-    setHideSandbox(false);
-  };
-
-  const clearAll = () => {
+    setSaving(true);
     try {
-      localStorage.removeItem(BRAND_KEY);
-      localStorage.removeItem(HIDE_SANDBOX_KEY);
-    } catch {}
-    setBrand("#6b4fff");
-    setHideSandbox(false);
-  };
+      const body = { brandColor: hex.trim(), sandboxMode };
+      const res = await fetch(`${BACKEND_URL}/api/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setBrandColor(hex.trim());
+      setSavedAt(new Date());
+    } catch (e) {
+      alert("Failed to save settings. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function resetDefault() {
+    setHex("#6b4fff");
+    setSandboxMode(true);
+  }
 
   return (
-    <div className="container" style={{ maxWidth: 820 }}>
+    <div className="container" style={{ maxWidth: 820, padding: 16 }}>
       <div className="card" style={{ marginTop: 12 }}>
         <h1 style={{ marginTop: 0 }}>Settings</h1>
-        <p className="muted" style={{ marginTop: -6 }}>
-          Personalize ChurPay for your team. Changes are saved locally in your browser.
-        </p>
+        {loadError && <div className="alert warn" style={{ marginBottom: 12 }}>{loadError}</div>}
 
         {/* Brand Color */}
-        <section style={{ marginTop: 18 }}>
+        <section style={{ marginTop: 12 }}>
           <h3 style={{ margin: 0 }}>Brand color</h3>
           <div className="row" style={{ alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
             <input
               type="color"
               className="input"
               aria-label="Brand color"
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
+              value={hex}
+              onChange={(e) => setHex(e.target.value)}
               style={{ width: 52, height: 38, padding: 4 }}
             />
             <input
@@ -82,66 +89,38 @@ export default function Settings() {
               placeholder="#6b4fff"
               value={hex}
               onChange={(e) => setHex(e.target.value)}
-              onBlur={applyHex}
-              onKeyDown={(e) => { if (e.key === "Enter") applyHex(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') validHex && save(); }}
               style={{ width: 140 }}
             />
-            <button className="btn" onClick={applyHex} disabled={!validHex}>
-              Apply
+            <button className="btn" onClick={save} disabled={!validHex || saving}>
+              {saving ? "Saving…" : "Save"}
             </button>
-            <div
-              className="swatch"
-              style={{
-                width: 28, height: 28, borderRadius: 6,
-                background: brand,
-                border: "1px solid rgba(0,0,0,.15)"
-              }}
-              title="Live preview"
-            />
+            <div className="swatch" style={{ width: 28, height: 28, borderRadius: 6, background: hex, border: '1px solid rgba(0,0,0,.15)' }} title="Preview" />
           </div>
-          {!validHex && (
-            <div className="alert warn" style={{ marginTop: 8 }}>
-              Enter a valid hex color like <code>#6b4fff</code>.
-            </div>
-          )}
+          {!validHex && <div className="alert warn" style={{ marginTop: 8 }}>Enter a valid hex like <code>#6b4fff</code>.</div>}
         </section>
 
-        {/* Sandbox Badge Toggle */}
+        {/* Sandbox Toggle */}
         <section style={{ marginTop: 18 }}>
           <h3 style={{ margin: 0 }}>Sandbox badge</h3>
           <label className="switch" style={{ marginTop: 8 }}>
-            <input
-              type="checkbox"
-              checked={hideSandbox}
-              onChange={(e) => setHideSandbox(e.target.checked)}
-            />
+            <input type="checkbox" checked={sandboxMode} onChange={(e)=>setSandboxMode(e.target.checked)} />
             <span className="track"><span className="thumb" /></span>
-            <span className="muted">Hide Sandbox badge when not in production</span>
+            <span className="muted">Show SANDBOX badge (recommended in testing)</span>
           </label>
         </section>
 
         {/* Actions */}
         <section style={{ marginTop: 18 }}>
-          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             <button className="btn ghost" onClick={resetDefault}>Reset to defaults</button>
-            <button className="btn" onClick={clearAll}>Clear saved settings</button>
             {savedAt && (
               <span className="muted" title={savedAt.toLocaleString()}>
-                Saved {Math.max(1, Math.floor((Date.now() - savedAt.getTime()) / 1000))}s ago
+                Saved {Math.max(1, Math.floor((Date.now() - savedAt.getTime())/1000))}s ago
               </span>
             )}
           </div>
         </section>
-      </div>
-
-      {/* Tips */}
-      <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Tips</h3>
-        <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
-          <li>The brand color updates primary buttons, accents, and the topbar hairline.</li>
-          <li>The Sandbox badge is only visible when <code>VITE_ENV</code> isn’t <code>production</code>.</li>
-          <li>Settings are stored per-browser. Teammates can pick their own preview colors.</li>
-        </ul>
       </div>
     </div>
   );
