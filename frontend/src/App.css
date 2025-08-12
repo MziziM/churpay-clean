@@ -472,3 +472,170 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 80%, var(--text) 
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+/* === Polished Fintech Touches (non-breaking) ======================= */
+
+/* Brand surface */
+:root {
+  --brand: #6b4fff;           /* already set in-app if user changes brand */
+  --brand-600: #5a3ef6;
+  --brand-700: #4a31e6;
+  --ring: color-mix(in oklab, var(--brand), white 25%);
+  --text-weak: color-mix(in oklab, var(--text, #1a1a1a), white 45%);
+}
+
+/* Topbar subtle gradient + hairline */
+.topbar {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--brand), white 92%) 0%, transparent 80%);
+  border-bottom: 1px solid color-mix(in oklab, var(--brand), #000 90%);
+}
+
+/* Logo hover nudge */
+.topbar .brand { transition: transform .15s ease; }
+.topbar a:hover .brand { transform: translateY(-1px); }
+
+/* Buttons */
+.btn {
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--brand), #000 85%);
+  transition: background-color .15s ease, border-color .15s ease, transform .02s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.btn.btn-primary {
+  background: linear-gradient(180deg, var(--brand) 0%, var(--brand-600) 100%);
+  color: #fff;
+  border-color: color-mix(in oklab, var(--brand-700), #000 65%);
+}
+.btn.btn-primary:hover {
+  filter: brightness(1.03);
+}
+
+/* Ghost buttons hover clarity */
+.btn.ghost {
+  background: transparent;
+  color: inherit;
+}
+.btn.ghost:hover {
+  background: color-mix(in oklab, var(--brand), white 92%);
+}
+
+/* Inputs */
+.input {
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--brand), #000 85%);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.input:focus-visible {
+  outline: none;
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* Badges */
+.badge {
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: color-mix(in oklab, var(--brand), white 90%);
+  border: 1px solid color-mix(in oklab, var(--brand), #000 85%);
+}
+.badge-ok    { background: color-mix(in oklab, #22c55e, white 85%); border-color: color-mix(in oklab, #22c55e, #000 80%); }
+.badge-warn  { background: color-mix(in oklab, #f59e0b, white 85%); border-color: color-mix(in oklab, #f59e0b, #000 80%); }
+.badge-err   { background: color-mix(in oklab, #ef4444, white 85%); border-color: color-mix(in oklab, #ef4444, #000 80%); }
+
+/* Table polish */
+.table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--brand), #000 88%);
+  border-radius: 14px;
+}
+.table thead th {
+  background: color-mix(in oklab, var(--brand), white 93%);
+  font-weight: 600;
+  color: var(--text, #1a1a1a);
+  border-bottom: 1px solid color-mix(in oklab, var(--brand), #000 88%);
+}
+.table .th-sort {
+  background: transparent;
+  border: 0;
+  padding: 10px 12px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.table tbody tr {
+  border-bottom: 1px solid color-mix(in oklab, var(--brand), #000 92%);
+}
+.table tbody tr:hover {
+  background: color-mix(in oklab, var(--brand), white 96%);
+}
+.table.compact td, .table.compact th {
+  padding: 8px 10px;
+}
+
+/* Skeleton shimmer */
+.skeleton-block {
+  background:
+    linear-gradient(90deg,
+      #eee 25%,
+      #f6f6f6 37%,
+      #eee 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.25s infinite linear;
+  border-radius: 6px;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+/* Modal depth */
+.modal-backdrop {
+  background: color-mix(in oklab, #000, transparent 65%);
+  backdrop-filter: blur(2px);
+}
+.modal {
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--brand), #000 85%);
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+}
+
+/* Toasts */
+.toast-wrap {
+  gap: 8px;
+}
+.toast {
+  border: 1px solid color-mix(in oklab, var(--brand), #000 85%);
+  box-shadow: 0 6px 18px rgba(0,0,0,.10);
+}
+
+/* KPI cards */
+.kpi {
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--brand), #000 90%);
+  background: color-mix(in oklab, var(--brand), white 97%);
+}
+.kpi .value { font-weight: 700; }
+
+/* Copy pill */
+.copy-id {
+  position: relative;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 2px 6px;
+}
+.copy-id:hover {
+  background: color-mix(in oklab, var(--brand), white 92%);
+}
+.copied-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, #22c55e, white 85%);
+  border: 1px solid color-mix(in oklab, #22c55e, #000 82%);
+}
