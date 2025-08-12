@@ -11,7 +11,9 @@ import nodemailer from 'nodemailer';
 // near the top, after imports
 import { execSync } from 'child_process';
 import os from 'os';
-import appPkg from './package.json' assert { type: 'json' };
+
+import { readFileSync } from 'fs';
+const appPkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url)));
 
 
 
