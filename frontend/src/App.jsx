@@ -59,6 +59,36 @@ function DeckKeyForm({ expectedKey, onUnlock }) {
   );
 }
 
+function PayFastTopUpBox({ defaultAmount = 10, onPay }) {
+  const [amt, setAmt] = useState(defaultAmount);
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+      <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: 'wrap' }}>
+        <label htmlFor="topup-amount" className="label">Top up amount (ZAR)</label>
+        <input
+          id="topup-amount"
+          type="number"
+          min="1"
+          step="1"
+          className="input"
+          value={amt}
+          onChange={(e) => setAmt(e.target.value)}
+          style={{ maxWidth: 200 }}
+        />
+        <button
+          className="btn btn-primary"
+          onClick={() => onPay?.(amt)}
+        >
+          <span aria-hidden>💳</span>&nbsp;Pay with PayFast
+        </button>
+      </div>
+      <p className="muted" style={{ marginTop: 8 }}>
+        You’ll be redirected to PayFast to complete the payment. After payment, you’ll return here and the status will update via IPN.
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   // If not provided, default to same-origin
   const apiBase = (import.meta.env.VITE_API_URL || "").trim() || "";
@@ -92,10 +122,22 @@ export default function App() {
     try { return localStorage.getItem('churpay_compact') === 'true'; } catch { return false; }
   });
   const [qDebounced, setQDebounced] = useState("");
-useEffect(() => {
-  const t = setTimeout(() => setQDebounced(query), 250);
-  return () => clearTimeout(t);
-}, [query]);
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(query), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // Form-post flow direct to PayFast via our server (avoids 400s)
+  const openPayFastForm = (amountNumber) => {
+    const amount = Number(amountNumber || 0);
+    if (!isFinite(amount) || amount <= 0) {
+      pushToast("err", "Enter a valid amount");
+      return;
+    }
+    const backend = (apiBase && apiBase.trim()) || (window.location.hostname.includes("churpay.com") ? "https://api.churpay.com" : "http://localhost:5000");
+    const url = `${backend}/api/payfast/initiate-form?amount=${encodeURIComponent(amount.toFixed(2))}`;
+    window.location.href = url;
+  };
   useEffect(() => {
     try { localStorage.setItem('churpay_compact', compact ? 'true' : 'false'); } catch {}
   }, [compact]);
@@ -690,7 +732,9 @@ if (path === "/settings") {
             <span className="badge">Sandbox</span>
           )}
           <nav className="topnav" aria-label="Main">
-            <a className="btn ghost" href="/admin" title="Open Admin">Admin</a>
+           <a className="btn ghost" href="/admin" title="Open Admin">
+  <span aria-hidden>🔒</span>&nbsp;Admin
+</a>
           </nav>
         </div>
       </div>
@@ -709,6 +753,9 @@ if (path === "/settings") {
           <div className="point">Built for churches &amp; NPOs</div>
         </div>
       </div>
+
+      {/* Quick Top-Up (Form POST flow) */}
+      <PayFastTopUpBox defaultAmount={10} />
 
       {/* KPIs */}
       <div
@@ -760,7 +807,7 @@ if (path === "/settings") {
             onClick={() => startPayment()}
             disabled={busy || !amountValid}
           >
-            {busy ? "Starting…" : "Pay with PayFast (Sandbox)"}
+            {busy ? "Starting…" : "💳 Pay with PayFast"}
           </button>
           <button
             className="btn btn-primary"
@@ -768,7 +815,15 @@ if (path === "/settings") {
             disabled={busy}
             title="Quick R10 demo"
           >
-            Demo R10
+            <span aria-hidden>🧪</span>&nbsp;Demo R10
+          </button>
+          <button
+            className="btn"
+            onClick={() => openPayFastForm(amount)}
+            disabled={!amountValid}
+            title="Use server form (POST)"
+          >
+            <span aria-hidden>↗️</span>&nbsp;Open PayFast (Form)
           </button>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
@@ -842,7 +897,7 @@ if (path === "/settings") {
           <input
            ref={searchRef}
             className="input"
-            placeholder="Search by ID, PF ID, amount, or status…"
+           placeholder="🔎 Search by ID, PF ID, amount, or status…"
             value={query}
             onChange={(e)=>setQuery(e.target.value)}
             style={{ maxWidth: 320 }}
@@ -894,8 +949,12 @@ if (path === "/settings") {
                 <button type="button" className="btn ghost" onClick={()=>{ setFromDate(""); setToDate(""); }}>Clear dates</button>
               )}
             </div>
-            <button type="button" className="btn ghost" onClick={exportCSV} disabled={filteredPayments.length === 0} title="Download filtered as CSV">Export CSV</button>
-<button type="button" className="btn ghost" onClick={exportJSON} disabled={filteredPayments.length === 0} title="Download filtered as JSON">Export JSON</button>
+            <button type="button" className="btn ghost" onClick={exportCSV} disabled={filteredPayments.length === 0} title="Download filtered as CSV">
+  <span aria-hidden>⬇️</span>&nbsp;Export CSV
+</button>
+<button type="button" className="btn ghost" onClick={exportJSON} disabled={filteredPayments.length === 0} title="Download filtered as JSON">
+  <span aria-hidden>⬇️</span>&nbsp;Export JSON
+</button>
             <button type="button" className="btn" onClick={resetFilters} title="Clear search, filters and dates">Reset filters</button>
             <select
               className="input"
