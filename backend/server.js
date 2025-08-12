@@ -10,9 +10,14 @@ import bcrypt from 'bcryptjs';
 // near the top, after imports
 import { execSync } from 'child_process';
 import os from 'os';
+import appPkg from './package.json' assert { type: 'json' };
+
+
 
 // Add version info once during startup
 let buildInfo = {
+  name: appPkg.name || 'backend',
+  version: appPkg.version || '0.0.0',
   commit: 'unknown',
   builtAt: new Date().toISOString(),
   env: process.env.NODE_ENV || 'development',
@@ -26,35 +31,7 @@ try {
   console.warn('[Debug] Could not get git commit hash', err.message);
 }
 
-// ... your existing app setup
 
-// DEBUG: list routes (already exists)
-app.get('/api/debug/routes', (req, res) => {
-  const routes = [];
-  app._router.stack.forEach((middleware) => {
-    if (middleware.route) {
-      routes.push({
-        methods: Object.keys(middleware.route.methods).map(m => m.toUpperCase()),
-        path: middleware.route.path
-      });
-    } else if (middleware.name === 'router') {
-      middleware.handle.stack.forEach((handler) => {
-        if (handler.route) {
-          routes.push({
-            methods: Object.keys(handler.route.methods).map(m => m.toUpperCase()),
-            path: handler.route.path
-          });
-        }
-      });
-    }
-  });
-  res.json({ count: routes.length, routes });
-});
-
-// NEW: version info endpoint
-app.get('/api/debug/version', (req, res) => {
-  res.json(buildInfo);
-});
 const app = express();
 app.use((req, res, next) => {
   res.header('Vary', 'Origin');
@@ -111,6 +88,34 @@ app.get('/api/debug/cors', (req, res) => {
       'Access-Control-Allow-Credentials': res.getHeader('Access-Control-Allow-Credentials')
     }
   });
+});
+
+// Debug: list registered routes (methods + path)
+function collectRoutes(app) {
+  const out = [];
+  const add = (route) => {
+    const methods = Object.keys(route.methods || {}).map(m => m.toUpperCase());
+    out.push({ methods, path: route.path });
+  };
+  const scanStack = (stack) => {
+    (stack || []).forEach((layer) => {
+      if (layer.route) {
+        add(layer.route);
+      } else if (layer.name === 'router' && layer.handle && layer.handle.stack) {
+        scanStack(layer.handle.stack);
+      }
+    });
+  };
+  if (app._router && app._router.stack) scanStack(app._router.stack);
+  return out;
+}
+app.get('/api/debug/routes', (req, res) => {
+  const routes = collectRoutes(app);
+  res.json({ count: routes.length, routes });
+});
+// Version info endpoint
+app.get('/api/debug/version', (req, res) => {
+  res.json(buildInfo);
 });
 
 // other middleware and routes below...
