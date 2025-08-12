@@ -97,6 +97,13 @@ if (DATABASE_URL) {
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
+      // Ensure legacy databases get new columns
+      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS merchant_reference TEXT;`);
+      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_email TEXT;`);
+      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_name TEXT;`);
+      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();`);
+      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS pf_payment_id TEXT;`);
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_pf_payment_id ON payments(pf_payment_id) WHERE pf_payment_id IS NOT NULL;`);
       // Create ipn_events table for raw IPN logs
       await pool.query(`
         CREATE TABLE IF NOT EXISTS ipn_events (
