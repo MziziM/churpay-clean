@@ -639,3 +639,23 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 80%, var(--text) 
   background: color-mix(in oklab, #22c55e, white 85%);
   border: 1px solid color-mix(in oklab, #22c55e, #000 82%);
 }
+/* === Topbar live/neutral theming (uses currentColor) === */
+/* Make links and ghost buttons inherit the topbar foreground (white on brand, dark on neutral) */
+.topbar a { color: inherit; text-decoration: none; }
+.topbar a:hover { text-decoration: underline; text-decoration-thickness: 1px; }
+
+/* Ghost buttons adapt to foreground */
+.topbar .btn.ghost { 
+  color: inherit; 
+  border-color: color-mix(in oklab, currentColor, transparent 70%);
+}
+.topbar .btn.ghost:hover {
+  background: color-mix(in oklab, currentColor, transparent 92%);
+}
+
+/* Badges inside topbar inherit too (transparent background on brand, subtle border) */
+.topbar .badge {
+  background: transparent;
+  color: inherit;
+  border-color: color-mix(in oklab, currentColor, transparent 70%);
+}
