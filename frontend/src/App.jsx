@@ -7,7 +7,23 @@ function PayfastReturn() {
       } catch {}
     }, 1200);
   }, []);
-
+{/* Export toolbar */}
+<div className="row" style={{ justifyContent: 'flex-end', gap: 8, margin: '8px 0' }}>
+  <button
+    className="btn ghost"
+    onClick={() => exportCSV(payments)}
+    title="Download CSV of current data"
+  >
+    Export CSV
+  </button>
+  <button
+    className="btn ghost"
+    onClick={() => exportJSON(payments)}
+    title="Download JSON of current data"
+  >
+    Export JSON
+  </button>
+</div>
   return (
     <div className="card" style={{ padding: 16, marginTop: 8 }}>
       <div className="alert ok" style={{ marginBottom: 12 }}>
@@ -254,7 +270,46 @@ useEffect(() => {
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
     []
   );
+  // --- Export helpers (CSV/JSON) ---
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
+  function toCSV(rows) {
+    if (!rows || !rows.length) return '';
+    // Collect all keys across rows so we don’t lose fields
+    const allKeys = Array.from(
+      rows.reduce((set, r) => { Object.keys(r || {}).forEach(k => set.add(k)); return set; }, new Set())
+    );
+    const esc = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    };
+    const head = allKeys.join(',');
+    const body = rows.map(r => allKeys.map(k => esc(r?.[k])).join(',')).join('\n');
+    return head + '\n' + body;
+  }
+
+  function exportCSV(rows, filename = `payments_${new Date().toISOString().slice(0,10)}.csv`) {
+    const csv = toCSV(rows || []);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    downloadBlob(blob, filename);
+  }
+
+  function exportJSON(rows, filename = `payments_${new Date().toISOString().slice(0,10)}.json`) {
+    const json = JSON.stringify(rows || [], null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    downloadBlob(blob, filename);
+  }
   // --- Tiny sparkline component (pure SVG, no libs) ---
   function _scaleSeries(series, width, height, pad = 2) {
     const n = series.length;
