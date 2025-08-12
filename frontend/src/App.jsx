@@ -255,6 +255,38 @@ useEffect(() => {
     []
   );
 
+  // --- Tiny sparkline component (pure SVG, no libs) ---
+  function _scaleSeries(series, width, height, pad = 2) {
+    const n = series.length;
+    if (n === 0) return { points: [] };
+    const min = Math.min(...series);
+    const max = Math.max(...series);
+    const span = max - min || 1; // avoid div by zero
+    const stepX = (width - pad * 2) / Math.max(1, n - 1);
+    const pts = series.map((v, i) => {
+      const x = pad + i * stepX;
+      const y = pad + (height - pad * 2) * (1 - (v - min) / span);
+      return [x, y];
+    });
+    return { points: pts, min, max };
+  }
+
+  function Sparkline({ series, width = 180, height = 36, showGrid = false, title }) {
+    if (!series || series.length < 2) return null;
+    const { points } = _scaleSeries(series, width, height);
+    const d = points.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+    return (
+      <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title || 'trend'} focusable="false">
+        {showGrid && (
+          <g className="grid">
+            <line x1="0" y1="18" x2={width} y2="18" />
+          </g>
+        )}
+        <path d={d} />
+      </svg>
+    );
+  }
+
   const pushToast = (type, msg, title) => {
     const id = nextId.current++;
     setToasts((ts) => [...ts, { id, type, msg, title }]);
@@ -404,6 +436,37 @@ useEffect(() => {
   const lastCreated = payments[0]?.created_at
     ? new Date(payments[0].created_at).toLocaleString()
     : "—";
+
+  // --- Build daily series for last 14 days (inclusive of today) ---
+  const { daysLabels, dailyCountSeries, dailyAmountSeries } = useMemo(() => {
+    const DAYS = 14;
+    const days = [];
+    const fmt = (d) => d.toISOString().slice(0,10);
+    const today = new Date();
+    // Build keys for last DAYS chronologically
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      days.push(fmt(d));
+    }
+    const countMap = Object.fromEntries(days.map(k => [k, 0]));
+    const amtMap = Object.fromEntries(days.map(k => [k, 0]));
+    for (const p of payments) {
+      if (!p.created_at) continue;
+      const k = fmt(new Date(p.created_at));
+      if (k in countMap) {
+        countMap[k] += 1;
+        const v = typeof p.amount === 'number' ? p.amount : Number(p.amount) || 0;
+        amtMap[k] += v;
+      }
+    }
+    return {
+      daysLabels: days,
+      dailyCountSeries: days.map(k => countMap[k]),
+      dailyAmountSeries: days.map(k => Number(amtMap[k].toFixed(2))),
+    };
+  }, [payments]);
+
 
   // --- Sort helper ---
   const sortRows = (rows, by, dir) => {
@@ -853,26 +916,21 @@ if (path === "/settings") {
       <PayFastTopUpBox defaultAmount={10} onPay={openPayFastForm} />
 
       {/* KPIs */}
-      <div
-        className="kpis"
-        style={{
-          display: "grid",
-          gap: 12,
-          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-          marginBottom: 12,
-        }}
-      >
+      <div className="kpis">
         <div className="kpi">
           <div className="label">Total processed</div>
           <div className="value">{ZAR.format(totalZar)}</div>
+          <Sparkline series={dailyAmountSeries} width={180} height={36} showGrid title="Amount trend (14d)" />
         </div>
         <div className="kpi">
           <div className="label">Payments</div>
           <div className="value">{totalCount}</div>
+          <Sparkline series={dailyCountSeries} width={180} height={36} showGrid title="Count trend (14d)" />
         </div>
         <div className="kpi">
           <div className="label">Last payment</div>
           <div className="value">{lastCreated}</div>
+          <Sparkline series={dailyCountSeries} width={180} height={36} title="Recent activity" />
         </div>
       </div>
 
