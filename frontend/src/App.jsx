@@ -194,6 +194,14 @@ export default function App() {
   const [brand, setBrand] = useState("#6b4fff");
   const [sandboxMode, setSandboxMode] = useState(null); // null = unknown (fall back to env)
 
+  // Topbar brand style: live (sandboxMode=false) uses brand background
+  const topbarStyle = useMemo(() => {
+    if (sandboxMode === false) {
+      return { background: 'var(--brand)', color: '#fff', boxShadow: '0 1px 0 rgba(0,0,0,0.06)' };
+    }
+    return { boxShadow: '0 1px 0 var(--line)' };
+  }, [sandboxMode]);
+
   // Form-post flow direct to PayFast via our server (avoids 400s)
   const openPayFastForm = (amountNumber) => {
     const amount = Number(amountNumber || 0);
@@ -782,7 +790,7 @@ if (path === "/settings") {
   return (
     <div className="container">
       {/* Header */}
-      <div className="topbar">
+      <div className="topbar" style={topbarStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <a href="/" style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
             <img
@@ -804,10 +812,24 @@ if (path === "/settings") {
           {((sandboxMode === true) || (sandboxMode === null && APP_ENV !== 'production')) && (
             <span className="badge">Sandbox</span>
           )}
+          {/* Live health + last updated badges */}
+          {health?.ok ? (
+            <span className="badge badge-ok" title="Backend reachable">API OK</span>
+          ) : health ? (
+            <span className="badge badge-err" title="Backend not reachable">API Down</span>
+          ) : null}
+          {lastAgo != null && (
+            <span className="badge ghost" title={lastRefreshAt ? new Date(lastRefreshAt).toLocaleString() : ''}>
+              Updated {lastAgo}s ago
+            </span>
+          )}
           <nav className="topnav" aria-label="Main">
-           <a className="btn ghost" href="/admin" title="Open Admin">
-  <span aria-hidden>🔒</span>&nbsp;Admin
-</a>
+            <a className="btn ghost" href="/settings" title="Open Settings">
+              <span aria-hidden>⚙️</span>&nbsp;Settings
+            </a>
+            <a className="btn ghost" href="/admin" title="Open Admin">
+              <span aria-hidden>🔒</span>&nbsp;Admin
+            </a>
           </nav>
         </div>
       </div>
