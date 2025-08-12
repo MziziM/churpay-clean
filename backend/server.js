@@ -151,51 +151,98 @@ if (DATABASE_URL) {
     connectionString: DATABASE_URL,
     ssl: DATABASE_URL.includes("render.com") || DATABASE_URL.includes("neon.tech") ? { rejectUnauthorized: false } : false,
   });
-  (async () => {
+  // --- Simple migrations runner (versioned, idempotent) ---
+  async function runMigrations() {
     try {
-      // Create payments table with all relevant columns
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS payments (
-          id SERIAL PRIMARY KEY,
-          pf_payment_id TEXT UNIQUE,
-          amount NUMERIC(12,2),
-          status TEXT,
-          merchant_reference TEXT,
-          payer_email TEXT,
-          payer_name TEXT,
-          created_at TIMESTAMPTZ DEFAULT NOW()
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          version TEXT PRIMARY KEY,
+          applied_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
-      // Ensure legacy databases get new columns
-      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS merchant_reference TEXT;`);
-      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_email TEXT;`);
-      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_name TEXT;`);
-      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();`);
-      await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS pf_payment_id TEXT;`);
-      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_pf_payment_id ON payments(pf_payment_id) WHERE pf_payment_id IS NOT NULL;`);
-      // Create ipn_events table for raw IPN logs
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS ipn_events (
-          id SERIAL PRIMARY KEY,
-          pf_payment_id TEXT,
-          raw JSONB,
-          created_at TIMESTAMPTZ DEFAULT NOW()
-        );
-      `);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          email TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          role TEXT DEFAULT 'admin',
-          created_at TIMESTAMPTZ DEFAULT NOW()
-        );
-      `);
-      console.log("[DB] payments and ipn_events tables ready");
+
+      const MIGRATIONS = [
+        {
+          version: '001_init_schema',
+          sql: `
+            CREATE TABLE IF NOT EXISTS payments (
+              id SERIAL PRIMARY KEY,
+              pf_payment_id TEXT UNIQUE,
+              amount NUMERIC(12,2),
+              status TEXT,
+              merchant_reference TEXT,
+              payer_email TEXT,
+              payer_name TEXT,
+              created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS ipn_events (
+              id SERIAL PRIMARY KEY,
+              pf_payment_id TEXT,
+              raw JSONB,
+              created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS users (
+              id SERIAL PRIMARY KEY,
+              email TEXT UNIQUE NOT NULL,
+              password_hash TEXT NOT NULL,
+              role TEXT DEFAULT 'admin',
+              created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+              id INT PRIMARY KEY,
+              brand_color TEXT,
+              sandbox_mode BOOLEAN
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_pf_payment_id
+              ON payments(pf_payment_id) WHERE pf_payment_id IS NOT NULL;
+          `,
+        },
+        {
+          version: '002_payments_columns_guard',
+          sql: `
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS merchant_reference TEXT;
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_email TEXT;
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_name TEXT;
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS pf_payment_id TEXT;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_pf_payment_id
+              ON payments(pf_payment_id) WHERE pf_payment_id IS NOT NULL;
+          `,
+        },
+                {
+          version: '003_payments_notes_tags',
+          sql: `
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS note TEXT;
+            ALTER TABLE payments ADD COLUMN IF NOT EXISTS tags TEXT[];
+          `,
+        },
+      ];
+      
+
+      for (const m of MIGRATIONS) {
+        const { rows } = await pool.query('SELECT 1 FROM schema_migrations WHERE version=$1', [m.version]);
+        if (rows.length) { console.log('[DB][migrate] skip', m.version); continue; }
+        console.log('[DB][migrate] apply', m.version);
+        await pool.query('BEGIN');
+        try {
+          await pool.query(m.sql);
+          await pool.query('INSERT INTO schema_migrations(version) VALUES($1)', [m.version]);
+          await pool.query('COMMIT');
+          console.log('[DB][migrate] done', m.version);
+        } catch (e) {
+          await pool.query('ROLLBACK');
+          console.error('[DB][migrate] failed', m.version, e);
+          throw e;
+        }
+      }
+      console.log('[DB] migrations complete');
     } catch (err) {
-      console.error("[DB] init error", err);
+      console.error('[DB] migration error', err);
     }
-  })();
+  }
+
+  // Run migrations at boot
+  await runMigrations();
 } else {
   console.warn("[DB] No DATABASE_URL configured — /api/payments will return []");
 }
@@ -208,31 +255,30 @@ app.get("/api/payments", async (req, res) => {
       return res.status(200).json([]);
     }
     const ref = (req.query.ref || '').toString().trim();
-    if (ref) {
-      const { rows } = await pool.query(
-        `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, created_at
-         FROM payments
-         WHERE merchant_reference = $1
-         ORDER BY created_at DESC
-         LIMIT 100`,
-        [ref]
-      );
-      return res.status(200).json(rows);
-    } else {
-      const { rows } = await pool.query(
-        `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, created_at
-         FROM payments
-         ORDER BY created_at DESC
-         LIMIT 100`
-      );
-      return res.status(200).json(rows);
-    }
-  } catch (err) {
-    console.error("[GET /api/payments]", err);
+   if (ref) {
+  const { rows } = await pool.query(
+    `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, note, tags, created_at
+     FROM payments
+     WHERE merchant_reference = $1
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [ref]
+  );
+  return res.status(200).json(rows);
+} else {
+  const { rows } = await pool.query(
+    `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, note, tags, created_at
+     FROM payments
+     ORDER BY created_at DESC
+     LIMIT 100`
+  );
+  return res.status(200).json(rows);
+  }
+} catch (e) {
+    console.error('[GET /api/payments]', e);
     return res.status(200).json([]);
   }
 });
-
 // Debug endpoint to read raw IPN events, filterable by ?ref= (matches m_payment_id or pf_payment_id)
 app.get('/api/ipn-events', async (req, res) => {
   try {
@@ -336,6 +382,12 @@ function requireAuth(req, res, next) {
   const data = verifyToken(t);
   if (!data) return res.status(401).json({ error: 'unauthorized' });
   req.user = data; next();
+}
+function requireAdmin(req, res, next) {
+  if (!req.user || String(req.user.role) !== 'admin') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  next();
 }
 
 app.post('/api/auth/bootstrap', async (req, res) => {
@@ -582,6 +634,161 @@ app.post("/api/payfast/ipn", async (req, res) => {
     res.status(200).send("OK"); // PayFast expects 200 regardless
   }
 });
+
+// Admin-only: revalidate a payment using the latest stored IPN event for a given reference
+app.post('/api/payfast/revalidate', requireAuth, async (req, res) => {
+  try {
+    if (!pool) return res.status(500).json({ error: 'no db' });
+    const ref = (req.body?.ref || '').toString().trim();
+    if (!ref) return res.status(400).json({ error: 'missing ref' });
+
+    // Load the most recent IPN payload for this reference (m_payment_id)
+    const { rows } = await pool.query(
+      `SELECT id, pf_payment_id, raw, created_at
+       FROM ipn_events
+       WHERE (raw->>'m_payment_id' = $1)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [ref]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'no ipn for ref' });
+
+    const ipn = rows[0];
+    const raw = ipn.raw || {};
+
+    // 1) Recompute signature with current passphrase
+    const receivedSig = String(raw.signature || '').toLowerCase();
+    const passphrase = process.env.PAYFAST_PASSPHRASE || '';
+    const { signature: _omit, ...paramsForSig } = raw;
+    const base = signatureBase(paramsForSig, passphrase);
+    const computed = md5hex(base);
+    const sigOk = !!(receivedSig && receivedSig === computed.toLowerCase());
+
+    // 2) Merchant match
+    const configuredMerchantId = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
+    const ipnMerchant = String(raw.merchant_id || '').trim();
+    const merchantOk = ipnMerchant && ipnMerchant === configuredMerchantId;
+
+    // 3) Server-to-server validate (postback to PayFast)
+    const remoteOk = await validateWithPayFast(raw);
+
+    // 4) Amount strict match to our stored intent
+    let amountOk = false;
+    let expectedAmount = null;
+    const ipnAmount = Number(raw.amount_gross || raw.amount || 0);
+    try {
+      const q = await pool.query(
+        'SELECT amount FROM payments WHERE merchant_reference=$1 ORDER BY created_at DESC LIMIT 1',
+        [ref]
+      );
+      if (q.rows.length) {
+        expectedAmount = Number(q.rows[0].amount);
+        amountOk = (Number(ipnAmount.toFixed(2)) === Number(expectedAmount.toFixed(2)));
+      }
+    } catch (e) {
+      console.error('[revalidate] amount lookup failed', e);
+    }
+
+    const finalOk = sigOk && merchantOk && remoteOk && amountOk;
+
+    // Upsert payment status based on revalidation result
+    try {
+      const pfId = raw.pf_payment_id || null;
+      const status = finalOk ? String(raw.payment_status || 'UNKNOWN') : 'INVALID';
+      const payer_email = raw.email_address || raw.payer_email || null;
+      const payer_name = raw.name_first || raw.payer_name || null;
+      const amt = Number(ipnAmount || 0);
+      await pool.query(
+        `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (pf_payment_id) DO UPDATE
+         SET amount = EXCLUDED.amount,
+             status = EXCLUDED.status,
+             merchant_reference = EXCLUDED.merchant_reference,
+             payer_email = EXCLUDED.payer_email,
+             payer_name = EXCLUDED.payer_name`,
+        [pfId, isFinite(amt) ? amt : 0, status, ref, payer_email, payer_name]
+      );
+    } catch (e) {
+      console.error('[revalidate] payments upsert error', e);
+    }
+
+    return res.json({ ok: finalOk, checks: { sigOk, merchantOk, remoteOk, amountOk, expectedAmount, ipnAmount } });
+  } catch (e) {
+    console.error('[revalidate] error', e);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// ---------------- Admin payment actions (require admin) ----------------
+app.post('/api/admin/payments/:id/status', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!pool) return res.status(500).json({ error: 'no db' });
+    const id = Number(req.params.id);
+    const status = String(req.body?.status || '').trim().toUpperCase();
+    const ALLOWED = new Set(['PAID','FAILED','PENDING','SUCCESS','COMPLETE','INVALID']);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    if (!ALLOWED.has(status)) return res.status(400).json({ error: 'bad status' });
+    const q = await pool.query('UPDATE payments SET status=$1 WHERE id=$2 RETURNING id, status', [status, id]);
+    if (!q.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, payment: q.rows[0] });
+  } catch (e) {
+    console.error('[admin/status]', e);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.post('/api/admin/payments/:id/note', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!pool) return res.status(500).json({ error: 'no db' });
+    const id = Number(req.params.id);
+    const note = String(req.body?.note || '').trim();
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    const q = await pool.query('UPDATE payments SET note=$1 WHERE id=$2 RETURNING id, note', [note || null, id]);
+    if (!q.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, payment: q.rows[0] });
+  } catch (e) {
+    console.error('[admin/note]', e);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.post('/api/admin/payments/:id/tag', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!pool) return res.status(500).json({ error: 'no db' });
+    const id = Number(req.params.id);
+    const tag = String(req.body?.tag || '').trim();
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    if (!tag) return res.status(400).json({ error: 'missing tag' });
+    const q = await pool.query(
+      `UPDATE payments
+         SET tags = (
+           CASE WHEN tags IS NULL THEN ARRAY[$1]::text[]
+                WHEN NOT ($1 = ANY(tags)) THEN array_append(tags, $1)
+                ELSE tags
+           END
+         )
+       WHERE id = $2
+       RETURNING id, tags`,
+      [tag, id]
+    );
+    if (!q.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, payment: q.rows[0] });
+  } catch (e) {
+    console.error('[admin/tag]', e);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+// ---------------- end admin payment actions ----------------
+
+// Allow one-off migrations via CLI flag
+if (process.argv.includes('--migrate-only')) {
+  if (!pool) {
+    console.warn('[DB] No DATABASE_URL configured, nothing to migrate.');
+    process.exit(0);
+  }
+  runMigrations().then(() => process.exit(0)).catch(() => process.exit(1));
+}
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log("Backend on", port));
