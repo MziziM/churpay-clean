@@ -145,8 +145,16 @@ export default function App() {
     window.addEventListener("payments:refresh", handler);
     return () => window.removeEventListener("payments:refresh", handler);
   }, []);
-  // If not provided, default to same-origin
-  const apiBase = (import.meta.env.VITE_API_URL || "").trim() || "";
+  const apiBase = (() => {
+    const v = (import.meta?.env?.VITE_API_URL || "").trim().replace(/\/$/, "");
+    if (v) return v;
+    if (typeof window !== "undefined") {
+      return window.location.hostname.includes("churpay.com")
+        ? "https://api.churpay.com"
+        : "http://localhost:5000";
+    }
+    return "";
+  })();
   const APP_ENV = (import.meta.env.VITE_ENV || "").trim().toLowerCase(); // "production" hides Sandbox badge
 
   const [health, setHealth] = useState(null);
@@ -181,6 +189,10 @@ export default function App() {
     const t = setTimeout(() => setQDebounced(query), 250);
     return () => clearTimeout(t);
   }, [query]);
+
+  // Settings from backend (brand color + sandbox badge)
+  const [brand, setBrand] = useState("#6b4fff");
+  const [sandboxMode, setSandboxMode] = useState(null); // null = unknown (fall back to env)
 
   // Form-post flow direct to PayFast via our server (avoids 400s)
   const openPayFastForm = (amountNumber) => {
@@ -625,17 +637,32 @@ if (qDebounced.trim()) {
 
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
-  // read Settings preferences (brand + hide sandbox) saved in localStorage
-const HIDE_SANDBOX_KEY = "churpay_hide_sandbox";
-const BRAND_KEY = "churpay_brand";
-const hideSandboxPref = localStorage.getItem(HIDE_SANDBOX_KEY) === "true";
-const savedBrand = localStorage.getItem(BRAND_KEY);
-// apply brand live if saved
-useEffect(() => {
-  if (savedBrand) {
-    document.documentElement.style.setProperty("--brand", savedBrand);
-  }
-}, [savedBrand]);
+  // Load settings from backend and apply CSS brand
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${apiBase}/api/settings`, { cache: 'no-store' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        if (!cancelled) {
+          if (j?.brandColor) {
+            setBrand(j.brandColor);
+            try { document.documentElement.style.setProperty('--brand', j.brandColor); } catch {}
+          }
+          if (typeof j?.sandboxMode === 'boolean') setSandboxMode(j.sandboxMode);
+        }
+      } catch (e) {
+        // fallback: keep defaults; env will decide sandbox badge
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiBase]);
+
+  // If brand state changes later for any reason, re-apply
+  useEffect(() => {
+    try { document.documentElement.style.setProperty('--brand', brand); } catch {}
+  }, [brand]);
 
   // Show toasts for return/cancel routes (and optional auto-redirect)
   useEffect(() => {
@@ -774,7 +801,7 @@ if (path === "/settings") {
           </a>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {APP_ENV !== "production" && !hideSandboxPref && (
+          {((sandboxMode === true) || (sandboxMode === null && APP_ENV !== 'production')) && (
             <span className="badge">Sandbox</span>
           )}
           <nav className="topnav" aria-label="Main">
