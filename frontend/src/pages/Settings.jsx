@@ -1,142 +1,147 @@
 import { useEffect, useMemo, useState } from "react";
-import "../App.css";
 
+// Shared keys with App.jsx
 const HIDE_SANDBOX_KEY = "churpay_hide_sandbox";
 const BRAND_KEY = "churpay_brand";
-const PAGE_SIZE_KEY = "churpay_default_page_size";
 
 export default function Settings() {
-  const [brand, setBrand] = useState("");
-  const [brandText, setBrandText] = useState("");
-  const [hideSandbox, setHideSandbox] = useState(false);
-  const [pageSize, setPageSize] = useState(10);
-  const [notice, setNotice] = useState("");
+  const [brand, setBrand] = useState(() => {
+    try { return localStorage.getItem(BRAND_KEY) || "#6b4fff"; } catch { return "#6b4fff"; }
+  });
+  const [hideSandbox, setHideSandbox] = useState(() => {
+    try { return localStorage.getItem(HIDE_SANDBOX_KEY) === "true"; } catch { return false; }
+  });
+  const [hex, setHex] = useState(brand);
+  const [savedAt, setSavedAt] = useState(null);
 
-  // Load saved prefs
+  // live preview brand
   useEffect(() => {
-    try {
-      const b = localStorage.getItem(BRAND_KEY) || "";
-      const h = localStorage.getItem(HIDE_SANDBOX_KEY) === "true";
-      const ps = Number(localStorage.getItem(PAGE_SIZE_KEY) || "10") || 10;
-      setBrand(b);
-      setBrandText(b);
-      setHideSandbox(h);
-      setPageSize(ps);
-      if (b) document.documentElement.style.setProperty("--brand", b); // live preview
-    } catch {}
-  }, []);
-
-  // Keep text field and color in sync when hex is valid
-  useEffect(() => {
-    if (/^#([0-9a-f]{3}){1,2}$/i.test(brandText)) setBrand(brandText);
-  }, [brandText]);
-
-  // Live preview brand when color changes
-  useEffect(() => {
-    if (brand) document.documentElement.style.setProperty("--brand", brand);
+    try { document.documentElement.style.setProperty("--brand", brand); } catch {}
+    setHex(brand);
   }, [brand]);
 
-  const save = () => {
-    try {
-      if (brand) localStorage.setItem(BRAND_KEY, brand);
-      else localStorage.removeItem(BRAND_KEY);
+  // persist (debounced)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(BRAND_KEY, brand);
+        localStorage.setItem(HIDE_SANDBOX_KEY, hideSandbox ? "true" : "false");
+        setSavedAt(new Date());
+      } catch {}
+    }, 200);
+    return () => clearTimeout(t);
+  }, [brand, hideSandbox]);
 
-      localStorage.setItem(HIDE_SANDBOX_KEY, hideSandbox ? "true" : "false");
-      localStorage.setItem(PAGE_SIZE_KEY, String(pageSize));
+  const validHex = useMemo(
+    () => /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex.trim()),
+    [hex]
+  );
 
-      setNotice("Settings saved. Reloading…");
-      setTimeout(() => { window.location.href = "/?v=" + Date.now(); }, 600);
-    } catch {
-      setNotice("Could not save settings. Check browser privacy settings.");
-    }
+  const applyHex = () => {
+    if (!validHex) return;
+    setBrand(hex.trim());
   };
 
-  const resetDefaults = () => {
+  const resetDefault = () => {
+    setBrand("#6b4fff");
+    setHideSandbox(false);
+  };
+
+  const clearAll = () => {
     try {
       localStorage.removeItem(BRAND_KEY);
       localStorage.removeItem(HIDE_SANDBOX_KEY);
-      localStorage.removeItem(PAGE_SIZE_KEY);
-      setNotice("Settings reset. Reloading…");
-      setTimeout(() => { window.location.href = "/?v=" + Date.now(); }, 600);
     } catch {}
+    setBrand("#6b4fff");
+    setHideSandbox(false);
   };
 
-  const brandPreview = useMemo(() => ({
-    width: 20, height: 20, borderRadius: 4,
-    border: '1px solid var(--border)',
-    background: brand || 'var(--brand)',
-  }), [brand]);
-
   return (
-    <div className="container">
-      <div className="card" style={{ marginBottom: 12 }}>
-        <h1 style={{ margin: 0 }}>Settings</h1>
-        <div className="muted" style={{ marginTop: 6 }}>
-          These settings are stored in your browser and apply instantly.
-        </div>
-        {notice && <div className="alert ok" style={{ marginTop: 8 }}>{notice}</div>}
-      </div>
+    <div className="container" style={{ maxWidth: 820 }}>
+      <div className="card" style={{ marginTop: 12 }}>
+        <h1 style={{ marginTop: 0 }}>Settings</h1>
+        <p className="muted" style={{ marginTop: -6 }}>
+          Personalize ChurPay for your team. Changes are saved locally in your browser.
+        </p>
 
-      <div className="card" style={{ display: 'grid', gap: 12 }}>
-        <section>
-          <h2 style={{ marginTop: 0 }}>Brand</h2>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={brandPreview} title="Preview" />
+        {/* Brand Color */}
+        <section style={{ marginTop: 18 }}>
+          <h3 style={{ margin: 0 }}>Brand color</h3>
+          <div className="row" style={{ alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
             <input
               type="color"
-              value={/^#([0-9a-f]{3}){1,2}$/i.test(brand) ? brand : '#6d28d9'}
-              onChange={(e)=>{ setBrand(e.target.value); setBrandText(e.target.value); }}
+              className="input"
               aria-label="Brand color"
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              style={{ width: 52, height: 38, padding: 4 }}
             />
             <input
               className="input"
-              placeholder="#6d28d9"
-              value={brandText}
-              onChange={(e)=>setBrandText(e.target.value)}
-              style={{ width: 120 }}
-              aria-label="Brand color hex"
+              aria-label="Hex code"
+              placeholder="#6b4fff"
+              value={hex}
+              onChange={(e) => setHex(e.target.value)}
+              onBlur={applyHex}
+              onKeyDown={(e) => { if (e.key === "Enter") applyHex(); }}
+              style={{ width: 140 }}
             />
-            <button className="btn ghost" onClick={()=>{ setBrand('#6d28d9'); setBrandText('#6d28d9'); }}>
-              Use default
+            <button className="btn" onClick={applyHex} disabled={!validHex}>
+              Apply
             </button>
+            <div
+              className="swatch"
+              style={{
+                width: 28, height: 28, borderRadius: 6,
+                background: brand,
+                border: "1px solid rgba(0,0,0,.15)"
+              }}
+              title="Live preview"
+            />
           </div>
+          {!validHex && (
+            <div className="alert warn" style={{ marginTop: 8 }}>
+              Enter a valid hex color like <code>#6b4fff</code>.
+            </div>
+          )}
         </section>
 
-        <section>
-          <h2 style={{ marginTop: 0 }}>Display</h2>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Sandbox Badge Toggle */}
+        <section style={{ marginTop: 18 }}>
+          <h3 style={{ margin: 0 }}>Sandbox badge</h3>
+          <label className="switch" style={{ marginTop: 8 }}>
             <input
               type="checkbox"
               checked={hideSandbox}
-              onChange={(e)=>setHideSandbox(e.target.checked)}
+              onChange={(e) => setHideSandbox(e.target.checked)}
             />
-            Hide Sandbox badge in header
+            <span className="track"><span className="thumb" /></span>
+            <span className="muted">Hide Sandbox badge when not in production</span>
           </label>
         </section>
 
-        <section>
-          <h2 style={{ marginTop: 0 }}>Table defaults</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label className="label" htmlFor="pageSize">Rows per page</label>
-            <select
-              id="pageSize"
-              className="input"
-              value={pageSize}
-              onChange={(e)=>setPageSize(Number(e.target.value)||10)}
-              style={{ width: 120 }}
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
+        {/* Actions */}
+        <section style={{ marginTop: 18 }}>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <button className="btn ghost" onClick={resetDefault}>Reset to defaults</button>
+            <button className="btn" onClick={clearAll}>Clear saved settings</button>
+            {savedAt && (
+              <span className="muted" title={savedAt.toLocaleString()}>
+                Saved {Math.max(1, Math.floor((Date.now() - savedAt.getTime()) / 1000))}s ago
+              </span>
+            )}
           </div>
         </section>
+      </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={save}>Save</button>
-          <button className="btn ghost" onClick={resetDefaults}>Reset defaults</button>
-          <a className="btn ghost" href="/">Back</a>
-        </div>
+      {/* Tips */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Tips</h3>
+        <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
+          <li>The brand color updates primary buttons, accents, and the topbar hairline.</li>
+          <li>The Sandbox badge is only visible when <code>VITE_ENV</code> isn’t <code>production</code>.</li>
+          <li>Settings are stored per-browser. Teammates can pick their own preview colors.</li>
+        </ul>
       </div>
     </div>
   );
