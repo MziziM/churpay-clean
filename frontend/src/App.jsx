@@ -250,10 +250,18 @@ useEffect(() => {
       const rows = getExportRows();
       if (rows.length) exportCSV(rows);
     }
+    if (!typing && e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setPage(p => Math.max(1, p - 1));
+    }
+    if (!typing && e.key === 'ArrowRight') {
+      e.preventDefault();
+      setPage(p => Math.min(totalPages, p + 1));
+    }
   };
   window.addEventListener('keydown', onKey);
   return () => window.removeEventListener('keydown', onKey);
-}, [loadingPayments]);
+}, [loadingPayments, totalPages]);
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -299,6 +307,27 @@ useEffect(() => {
     const blob = new Blob([json], { type: 'application/json' });
     downloadBlob(blob, filename);
   }
+  // --- Highlight helper for search matches ---
+  function highlightText(value, queryStr) {
+    const text = value == null ? '' : String(value);
+    const q = (queryStr || '').trim();
+    if (!q) return text;
+    try {
+      const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(esc, 'ig');
+      const parts = text.split(re);
+      const matches = text.match(re) || [];
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i]) out.push(<span key={`p${i}`}>{parts[i]}</span>);
+        if (i < matches.length) out.push(<mark key={`m${i}`}>{matches[i]}</mark>);
+      }
+      return <>{out}</>;
+    } catch {
+      return text;
+    }
+  }
+
   // --- Tiny sparkline component (pure SVG, no libs) ---
   function _scaleSeries(series, width, height, pad = 2) {
     const n = series.length;
@@ -365,6 +394,18 @@ useEffect(() => {
         }), 1500);
       })
       .catch(() => pushToast("err", "Failed to copy"));
+  };
+
+    // Copy any object as pretty JSON
+  const copyJsonToClipboard = (obj) => {
+    try {
+      const txt = JSON.stringify(obj ?? {}, null, 2);
+      navigator.clipboard.writeText(txt)
+        .then(() => pushToast('ok', 'Copied row JSON to clipboard'))
+        .catch(() => pushToast('err', 'Failed to copy JSON'));
+    } catch {
+      pushToast('err', 'Could not serialise row');
+    }
   };
 
   const loadHealth = async () => {
@@ -577,21 +618,27 @@ useEffect(() => {
     }
 
     // Text query (debounced)
-if (qDebounced.trim()) {
-  const q = qDebounced.trim().toLowerCase();
-  result = result.filter((p) => {
-    const idStr = String(p.id ?? "");
-    const pfid = String(p.pf_payment_id ?? "");
-    const amt = typeof p.amount === "number" ? String(p.amount) : String(p.amount ?? "");
-    const s = String(p.status ?? "").toLowerCase();
-    return (
-      idStr.toLowerCase().includes(q) ||
-      pfid.toLowerCase().includes(q) ||
-      amt.toLowerCase().includes(q) ||
-      s.includes(q)
-    );
-  });
-}
+    if (qDebounced.trim()) {
+      const q = qDebounced.trim().toLowerCase();
+      result = result.filter((p) => {
+        const idStr = String(p.id ?? "");
+        const pfid = String(p.pf_payment_id ?? "");
+        const ref = String(p.merchant_reference ?? "");
+        const email = String(p.payer_email ?? "");
+        const name = String(p.payer_name ?? "");
+        const amt = typeof p.amount === "number" ? String(p.amount) : String(p.amount ?? "");
+        const s = String(p.status ?? "").toLowerCase();
+        return (
+          idStr.toLowerCase().includes(q) ||
+          pfid.toLowerCase().includes(q) ||
+          ref.toLowerCase().includes(q) ||
+          email.toLowerCase().includes(q) ||
+          name.toLowerCase().includes(q) ||
+          amt.toLowerCase().includes(q) ||
+          s.includes(q)
+        );
+      });
+    }
 
     return sortRows(result, sortBy, sortDir);
   }, [payments, qDebounced, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir]);
@@ -599,6 +646,16 @@ if (qDebounced.trim()) {
   const totalFiltered = filteredPayments.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
   const currentPage = Math.min(page, totalPages);
+  const pageNumbers = useMemo(() => {
+    const maxButtons = 7; // window size for numbered buttons
+    const half = Math.floor(maxButtons / 2);
+    let start = Math.max(1, currentPage - half);
+    let end = Math.min(totalPages, start + maxButtons - 1);
+    if (end - start + 1 < maxButtons) {
+      start = Math.max(1, end - maxButtons + 1);
+    }
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }, [currentPage, totalPages]);
   const startIndex = (currentPage - 1) * pageSize;
   const pagedPayments = filteredPayments.slice(startIndex, startIndex + pageSize);
   useEffect(() => { setPage(1); }, [qDebounced, statusFilter, dateRange, pageSize, fromDate, toDate]);
@@ -1247,7 +1304,7 @@ if (path === "/settings") {
             </button>
           </div>
         </div>
-        <div className="tableWrap" style={{ marginTop: 8 }}>
+       <div className="tableWrap" style={{ marginTop: 8, maxHeight: '60vh', overflow: 'auto' }}>
           <table className={`table ${compact ? 'compact' : ''}`}>
             <thead>
               <tr>
@@ -1265,6 +1322,14 @@ if (path === "/settings") {
                     setSortDir(d => (sortBy === "pf_payment_id" ? (d === "asc" ? "desc" : "asc") : "asc"));
                   }}>
                     PF Payment ID {sortBy === "pf_payment_id" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </button>
+                </th>
+                <th>
+                  <button className="th-sort" onClick={() => {
+                    setSortBy("merchant_reference");
+                    setSortDir(d => (sortBy === "merchant_reference" ? (d === "asc" ? "desc" : "asc") : "asc"));
+                  }}>
+                    Reference {sortBy === "merchant_reference" ? (sortDir === "asc" ? "▲" : "▼") : ""}
                   </button>
                 </th>
                 <th>
@@ -1305,6 +1370,9 @@ if (path === "/settings") {
                       <td data-label="PF Payment ID">
                         <div className="skeleton-block" style={{ width: 80, height: 16 }} />
                       </td>
+                      <td data-label="Reference">
+                        <div className="skeleton-block" style={{ width: 110, height: 16 }} />
+                      </td>
                       <td data-label="Amount">
                         <div className="skeleton-block" style={{ width: 60, height: 16 }} />
                       </td>
@@ -1319,7 +1387,7 @@ if (path === "/settings") {
                 </>
               ) : payments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="empty" style={{ textAlign: 'left' }}>
+                  <td colSpan={6} className="empty" style={{ textAlign: 'left' }}>
                     <div style={{ display: 'grid', gap: 10 }}>
                       <div>
                         <h3 style={{ margin: 0 }}>Welcome to ChurPay 👋</h3>
@@ -1340,7 +1408,7 @@ if (path === "/settings") {
                 </tr>
               ) : filteredPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={6} className="empty">
                     No payments match your filters.
                     <div style={{ marginTop: 8 }}>
                       <button className="btn" onClick={resetFilters}>Clear filters</button>
@@ -1354,7 +1422,7 @@ if (path === "/settings") {
                     if (tag === 'button' || tag === 'a' || tag === 'input') return; // let buttons/links work
                     setDetail(p);
                   }}>
-                    <td data-label="ID">{p.id}</td>
+                    <td data-label="ID">{highlightText(p.id, qDebounced)}</td>
                     <td data-label="PF Payment ID">
                       {p.pf_payment_id ? (
                         <span
@@ -1362,8 +1430,24 @@ if (path === "/settings") {
                           onClick={(e) => { e.stopPropagation(); copyToClipboard(p.pf_payment_id); }}
                           title={copied[p.pf_payment_id] ? "Copied!" : "Click to copy"}
                         >
-                          {p.pf_payment_id}
+                          {highlightText(p.pf_payment_id, qDebounced)}
                           {copied[p.pf_payment_id] && (
+                            <span className="copied-badge">Copied!</span>
+                          )}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td data-label="Reference">
+                      {p.merchant_reference ? (
+                        <span
+                          className="copy-id"
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard(p.merchant_reference); }}
+                          title={copied[p.merchant_reference] ? "Copied!" : "Click to copy"}
+                        >
+                          {highlightText(p.merchant_reference, qDebounced)}
+                          {copied[p.merchant_reference] && (
                             <span className="copied-badge">Copied!</span>
                           )}
                         </span>
@@ -1384,7 +1468,7 @@ if (path === "/settings") {
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={2} className="muted">Filtered total</td>
+                <td colSpan={3} className="muted">Filtered total</td>
                 <td>
                   {(() => {
                     const sum = filteredPayments.reduce((acc, p) => acc + (typeof p.amount === "number" ? p.amount : (Number(p.amount) || 0)), 0);
@@ -1398,12 +1482,26 @@ if (path === "/settings") {
         </div>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
           <div className="muted">Showing {totalFiltered === 0 ? 0 : (startIndex + 1)}–{Math.min(startIndex + pageSize, totalFiltered)} of {totalFiltered}</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button className="btn" disabled={currentPage <= 1} onClick={() => setPage(1)}>« First</button>
-            <button className="btn" disabled={currentPage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>‹ Prev</button>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn" disabled={currentPage <= 1} onClick={() => setPage(1)} title="First page">« First</button>
+            <button className="btn" disabled={currentPage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))} title="Previous page">‹ Prev</button>
+
+            {pageNumbers.map((n) => (
+              <button
+                key={n}
+                className={`btn ${n === currentPage ? '' : 'ghost'}`}
+                onClick={() => setPage(n)}
+                aria-current={n === currentPage ? 'page' : undefined}
+                title={`Go to page ${n}`}
+              >
+                {n}
+              </button>
+            ))}
+
+            <button className="btn" disabled={currentPage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))} title="Next page">Next ›</button>
+            <button className="btn" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)} title="Last page">Last »</button>
+
             <div className="muted">Page {currentPage} / {totalPages}</div>
-            <button className="btn" disabled={currentPage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next ›</button>
-            <button className="btn" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>Last »</button>
           </div>
         </div>
         <div className="footer">
@@ -1426,6 +1524,13 @@ if (path === "/settings") {
             Copy Reference
           </button>
         )}
+                <button
+          className="btn ghost"
+          onClick={() => copyJsonToClipboard(detail)}
+          title="Copy this row as JSON"
+        >
+          Copy row JSON
+        </button>
         <a
           className="btn ghost"
           href={`/?q=${encodeURIComponent(detail.pf_payment_id || detail.merchant_reference || '')}`}

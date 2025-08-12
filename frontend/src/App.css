@@ -736,3 +736,23 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 80%, var(--text) 
   stroke-width: 1;
   opacity: 0.6;
 }
+/* Sticky table header (works inside the scrollable .tableWrap) */
+.tableWrap {
+  /* inline styles set max-height/overflow; keeping these as defaults too */
+  overflow: auto;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card, #fff);
+  box-shadow: inset 0 -1px 0 var(--line, rgba(0,0,0,.08));
+}
+
+/* Nicer highlight for search matches */
+mark {
+  background: rgba(255, 221, 0, .35);
+  padding: 0 2px;
+  border-radius: 3px;
+}
