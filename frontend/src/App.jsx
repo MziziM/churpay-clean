@@ -54,6 +54,163 @@ function PayfastCancel() {
   );
 }
 
+// --- IPN Events Page ---
+function IpnEventsPage({ apiBase }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [expanded, setExpanded] = useState(new Set()); // which event IDs are expanded
+
+  // --- small helpers (local to this page) ---
+  const toggleExpand = (id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const copyJson = async (obj) => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(obj, null, 2));
+      alert('Copied JSON to clipboard');
+    } catch { alert('Copy failed'); }
+  };
+
+  const toCSV = (rows) => {
+    if (!rows || !rows.length) return '';
+    const headers = ['id','pf_payment_id','m_payment_id','status','created_at'];
+    const esc = (s) => '"' + String(s ?? '').replace(/"/g,'""') + '"';
+    const lines = [headers.join(',')];
+    for (const ev of rows) {
+      const raw = ev.raw || {};
+      lines.push([
+        ev.id,
+        ev.pf_payment_id || '',
+        raw.m_payment_id || '',
+        raw.payment_status || '',
+        ev.created_at || ''
+      ].map(esc).join(','));
+    }
+    return lines.join('\n');
+  };
+
+  const download = (name, mime, data) => {
+    const blob = new Blob([data], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportJSON = () => download(`ipn-events-${Date.now()}.json`, 'application/json', JSON.stringify(events, null, 2));
+  const exportCSV = () => download(`ipn-events-${Date.now()}.csv`, 'text/csv', toCSV(events));
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+      // Also support legacy ?ref= for direct links
+      if (!q && params.size === 0) {
+        const url = new URL(window.location.href);
+        const ref = url.searchParams.get('ref');
+        if (ref) params.set('ref', ref);
+      }
+      const r = await fetch(`${apiBase}/api/ipn-events?${params.toString()}`);
+      const j = await r.json().catch(() => []);
+      setEvents(Array.isArray(j) ? j : (j.rows || []));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); /* initial */ }, [apiBase]);
+
+  return (
+    <div className="container">
+      <div className="topbar" style={{ boxShadow: '0 1px 0 var(--line)' }}>
+        <a className="btn ghost" href="/">← Back</a>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn ghost" onClick={exportCSV} title="Download CSV">Export CSV</button>
+          <button className="btn ghost" onClick={exportJSON} title="Download JSON">Export JSON</button>
+          <button className="btn" onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h2 style={{ marginTop: 0 }}>IPN Events</h2>
+        <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input className="input" placeholder="Search (ref / m_payment_id)" value={q} onChange={(e)=>setQ(e.target.value)} style={{ width: 280 }} />
+          <input type="date" className="input" value={fromDate} onChange={(e)=>setFromDate(e.target.value)} />
+          <span className="muted">to</span>
+          <input type="date" className="input" value={toDate} onChange={(e)=>setToDate(e.target.value)} />
+          <button className="btn" onClick={load}>Apply</button>
+          {(q || fromDate || toDate) && (
+            <button className="btn ghost" onClick={()=>{ setQ(''); setFromDate(''); setToDate(''); load(); }}>Clear</button>
+          )}
+        </div>
+
+        <div className="tableWrap" style={{ marginTop: 10 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>PF Payment ID</th>
+                <th>Ref</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th style={{ width: 230 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.length === 0 ? (
+                <tr><td colSpan={6} className="empty">No IPN events yet.</td></tr>
+              ) : events.map(ev => {
+                const ref = ev.raw?.m_payment_id || ev.merchant_reference || '';
+                const isOpen = expanded.has(ev.id);
+                return (
+                  <>
+                    <tr>
+                      <td>{ev.id}</td>
+                      <td>{ev.raw?.pf_payment_id || ev.pf_payment_id || '-'}</td>
+                      <td>{ref || '-'}</td>
+                      <td>{(ev.raw?.payment_status || ev.status || '').toString()}</td>
+                      <td>{ev.created_at ? new Date(ev.created_at).toLocaleString() : '-'}</td>
+                      <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        {ref && (
+                          <a className="btn ghost" href={`/?q=${encodeURIComponent(ref)}`} title="Find in payments table">View payment</a>
+                        )}
+                        <button className="btn ghost" onClick={() => copyJson(ev.raw || ev)} title="Copy raw JSON">Copy JSON</button>
+                        <button className="btn" onClick={() => toggleExpand(ev.id)} title={isOpen ? 'Hide raw' : 'Show raw'}>
+                          {isOpen ? 'Hide raw' : 'Show raw'}
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={6}>
+                          <pre style={{ margin: 0, padding: 12, background: 'var(--muted)', borderRadius: 8, overflowX: 'auto' }}>
+{JSON.stringify(ev.raw || ev, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // --- Toasts UI (aria-live for accessibility) ---
 function Toasts({ toasts }) {
@@ -161,10 +318,15 @@ export default function App() {
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [amount, setAmount] = useState("50.00");
   const [busy, setBusy] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [toasts, setToasts] = useState([]);
+  // IPN Events count for topbar badge
+  const [ipnCount, setIpnCount] = useState(null);
   const nextId = useRef(1);
 
   const [copied, setCopied] = useState({});
+  // Backend base URL (Vite env for prod, empty for same-origin in dev)
+  const API_BASE = (import.meta?.env?.VITE_API_URL || '').replace(/\/$/, '');
   const [lastRefreshAt, setLastRefreshAt] = useState(0); // timestamp of last successful refresh
   const [nowTick, setNowTick] = useState(Date.now());   // re-render every second for "X seconds ago"
   const [query, setQuery] = useState("");
@@ -379,6 +541,93 @@ const searchRef = useRef(null);
     }
   };
 
+  // Re-run PayFast checks for a given reference (admin/debug tool)
+  async function revalidatePaymentByRef(ref) {
+    if (!ref) { pushToast('err', 'Missing reference'); return; }
+    try {
+      setRevalidating(true);
+      const res = await fetch(`${API_BASE}/api/payfast/revalidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ref })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        pushToast('err', data?.error || 'Revalidate failed');
+        return;
+      }
+      const { ok, checks = {} } = data;
+      const parts = [];
+      if (typeof checks.sigOk !== 'undefined') parts.push(`sig:${checks.sigOk ? '✓' : '✗'}`);
+      if (typeof checks.merchantOk !== 'undefined') parts.push(`merchant:${checks.merchantOk ? '✓' : '✗'}`);
+      if (typeof checks.remoteOk !== 'undefined') parts.push(`remote:${checks.remoteOk ? '✓' : '✗'}`);
+      if (typeof checks.amountOk !== 'undefined') parts.push(`amount:${checks.amountOk ? '✓' : '✗'}`);
+      pushToast(ok ? 'ok' : 'warn', `Revalidated (${parts.join(' • ')})`);
+      try { await loadPayments(); } catch {}
+    } catch {
+      pushToast('err', 'Revalidate error');
+    } finally {
+      setRevalidating(false);
+    }
+  }
+
+  // --- Admin actions (guarded by backend; will no-op if 401/404) ---
+  async function markPaymentStatus(id, status) {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/payments/${id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { pushToast('err', j?.error || `Failed to mark ${status}`); return; }
+      pushToast('ok', `Marked ${id} → ${status}`);
+      try { await loadPayments(); } catch {}
+    } catch {
+      pushToast('err', 'Network error');
+    }
+  }
+
+  async function addNoteToPayment(id) {
+    const note = prompt('Add note for payment #' + id + ':');
+    if (!note) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/payments/${id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ note })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { pushToast('err', j?.error || 'Failed to add note'); return; }
+      pushToast('ok', 'Note added');
+      try { await loadPayments(); } catch {}
+    } catch {
+      pushToast('err', 'Network error');
+    }
+  }
+
+  async function addTagToPayment(id) {
+    const tag = prompt('Add tag for payment #' + id + ' (e.g., youth, event, tithe):');
+    if (!tag) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/payments/${id}/tag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ tag })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { pushToast('err', j?.error || 'Failed to add tag'); return; }
+      pushToast('ok', `Tag added: ${tag}`);
+      try { await loadPayments(); } catch {}
+    } catch {
+      pushToast('err', 'Network error');
+    }
+  }
+
   const loadHealth = async () => {
     try {
       const r = await fetch(`${apiBase}/api/health`);
@@ -438,6 +687,28 @@ const searchRef = useRef(null);
     }
   };
 
+  // Lightweight IPN events count loader (tries ?count=1 first, falls back to array length)
+  const loadIpnCount = async () => {
+    try {
+      const url = new URL(`${apiBase}/api/ipn-events`);
+      url.searchParams.set('limit', '1');
+      url.searchParams.set('count', '1');
+      const r = await fetch(url.toString(), { cache: 'no-store' });
+      const j = await r.json().catch(() => ([]));
+      let count = null;
+      if (j && typeof j.count === 'number') {
+        count = j.count;
+      } else if (Array.isArray(j)) {
+        count = j.length;
+      } else if (j && Array.isArray(j.rows)) {
+        count = j.rows.length;
+      }
+      if (count !== null) setIpnCount(count);
+    } catch {
+      // keep previous ipnCount on error
+    }
+  };
+
   const startPayment = async (amt) => {
     const value = String(amt ?? amount).replace(",", ".");
     const num = Number.parseFloat(value);
@@ -474,6 +745,7 @@ const searchRef = useRef(null);
   useEffect(() => {
     loadHealth();
     loadPayments();
+    loadIpnCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
 
@@ -482,6 +754,17 @@ const searchRef = useRef(null);
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Refresh IPN count every 60s and when tab becomes visible
+  useEffect(() => {
+    const t = setInterval(() => loadIpnCount(), 60000);
+    const onVis = () => { if (document.visibilityState === 'visible') loadIpnCount(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [apiBase]);
 
   // KPIs
   const totalCount = payments.length;
@@ -888,6 +1171,10 @@ if (path === "/settings") {
     );
   }
 
+  // IPN Events page route
+  if (path.startsWith('/ipn-events')) {
+    return <IpnEventsPage apiBase={apiBase} />;
+  }
   // React-router routes for payfast return/cancel
   // If react-router is not set up, fallback to old path check
   if (path.startsWith("/payfast/return")) {
@@ -943,14 +1230,20 @@ if (path === "/settings") {
               Updated {lastAgo}s ago
             </span>
           )}
-          <nav className="topnav" aria-label="Main">
-            <a className="btn ghost" href="/settings" title="Open Settings">
-              <span aria-hidden>⚙️</span>&nbsp;Settings
-            </a>
-            <a className="btn ghost" href="/admin" title="Open Admin">
-              <span aria-hidden>🔒</span>&nbsp;Admin
-            </a>
-          </nav>
+      <nav className="topnav" aria-label="Main">
+        <a className="btn ghost" href="/ipn-events" title="View IPN callbacks" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span aria-hidden>🛰️</span>&nbsp;IPN Events
+          {typeof ipnCount === 'number' && ipnCount > 0 ? (
+            <span className="badge" style={{ marginLeft: 6 }}>{ipnCount}</span>
+          ) : null}
+        </a>
+        <a className="btn ghost" href="/settings" title="Open Settings">
+          <span aria-hidden>⚙️</span>&nbsp;Settings
+        </a>
+        <a className="btn ghost" href="/admin" title="Open Admin">
+          <span aria-hidden>🔒</span>&nbsp;Admin
+        </a>
+      </nav>
         </div>
       </div>
 
@@ -1525,7 +1818,15 @@ if (path === "/settings") {
             Copy Reference
           </button>
         )}
-                <button
+        <button
+          className="btn"
+          disabled={!detail?.merchant_reference || revalidating}
+          onClick={() => revalidatePaymentByRef(detail.merchant_reference)}
+          title="Re-run PayFast checks and update this payment"
+        >
+          {revalidating ? 'Revalidating…' : 'Revalidate'}
+        </button>
+        <button
           className="btn ghost"
           onClick={() => copyJsonToClipboard(detail)}
           title="Copy this row as JSON"
@@ -1540,6 +1841,35 @@ if (path === "/settings") {
           Find in table
         </a>
         <button className="btn ghost" disabled title="Refund (coming soon)">Refund…</button>
+        {/* Admin actions (require auth on backend) */}
+        <button
+          className="btn"
+          onClick={() => detail?.id && markPaymentStatus(detail.id, 'PAID')}
+          title="Mark this payment as PAID"
+        >
+          Mark Paid
+        </button>
+        <button
+          className="btn ghost"
+          onClick={() => detail?.id && markPaymentStatus(detail.id, 'FAILED')}
+          title="Mark this payment as FAILED"
+        >
+          Mark Failed
+        </button>
+        <button
+          className="btn"
+          onClick={() => detail?.id && addNoteToPayment(detail.id)}
+          title="Attach an internal note"
+        >
+          Add note
+        </button>
+        <button
+          className="btn ghost"
+          onClick={() => detail?.id && addTagToPayment(detail.id)}
+          title="Add a tag to this payment"
+        >
+          Add tag
+        </button>
       </div>
 
       {/* Details grid */}
@@ -1584,6 +1914,22 @@ if (path === "/settings") {
           <div>
             <span className="label">Payer Name</span>
             <div>{detail.payer_name}</div>
+          </div>
+        )}
+        {detail.note && (
+          <div>
+            <span className="label">Note</span>
+            <div style={{ whiteSpace: 'pre-wrap' }}>{detail.note}</div>
+          </div>
+        )}
+        {detail.tags && Array.isArray(detail.tags) && detail.tags.length > 0 && (
+          <div>
+            <span className="label">Tags</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {detail.tags.map((t, i) => (
+                <span key={i} className="badge">{String(t)}</span>
+              ))}
+            </div>
           </div>
         )}
       </div>
