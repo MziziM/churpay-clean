@@ -133,20 +133,63 @@ if (DATABASE_URL) {
 
 app.get("/", (_req, res) => res.json({ message: "Churpay Backend is running" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "backend" }));
-app.get("/api/payments", async (_req, res) => {
+app.get("/api/payments", async (req, res) => {
   try {
     if (!pool) {
       return res.status(200).json([]);
     }
-    const { rows } = await pool.query(
-      `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, created_at
-       FROM payments
-       ORDER BY created_at DESC
-       LIMIT 100`
-    );
-    return res.status(200).json(rows);
+    const ref = (req.query.ref || '').toString().trim();
+    if (ref) {
+      const { rows } = await pool.query(
+        `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, created_at
+         FROM payments
+         WHERE merchant_reference = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [ref]
+      );
+      return res.status(200).json(rows);
+    } else {
+      const { rows } = await pool.query(
+        `SELECT id, pf_payment_id, amount::float8 AS amount, status, merchant_reference, payer_email, payer_name, created_at
+         FROM payments
+         ORDER BY created_at DESC
+         LIMIT 100`
+      );
+      return res.status(200).json(rows);
+    }
   } catch (err) {
     console.error("[GET /api/payments]", err);
+    return res.status(200).json([]);
+  }
+});
+
+// Debug endpoint to read raw IPN events, filterable by ?ref= (matches m_payment_id or pf_payment_id)
+app.get('/api/ipn-events', async (req, res) => {
+  try {
+    if (!pool) return res.status(200).json([]);
+    const ref = (req.query.ref || '').toString().trim();
+    if (ref) {
+      const { rows } = await pool.query(
+        `SELECT id, pf_payment_id, created_at, raw
+         FROM ipn_events
+         WHERE (raw->>'m_payment_id' = $1 OR pf_payment_id = $1)
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [ref]
+      );
+      return res.status(200).json(rows);
+    } else {
+      const { rows } = await pool.query(
+        `SELECT id, pf_payment_id, created_at, raw
+         FROM ipn_events
+         ORDER BY created_at DESC
+         LIMIT 50`
+      );
+      return res.status(200).json(rows);
+    }
+  } catch (e) {
+    console.error('[GET /api/ipn-events]', e);
     return res.status(200).json([]);
   }
 });
@@ -342,6 +385,7 @@ app.post("/api/payfast/initiate", async (req, res) => {
 });
 
 app.post("/api/payfast/ipn", async (req, res) => {
+  console.log('[PayFast][IPN] hit', new Date().toISOString());
   try {
     const configuredMerchantId = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
     // Extract signature and params
