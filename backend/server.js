@@ -7,6 +7,7 @@ const { Pool } = pkg;
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import nodemailer from 'nodemailer';
 // near the top, after imports
 import { execSync } from 'child_process';
 import os from 'os';
@@ -33,6 +34,63 @@ try {
 
 
 const app = express();
+// -------------------- Mailer (optional via env) --------------------
+const MAIL_HOST = process.env.MAIL_HOST || '';
+const MAIL_PORT = Number(process.env.MAIL_PORT || 0);
+const MAIL_USER = process.env.MAIL_USER || '';
+const MAIL_PASS = process.env.MAIL_PASS || '';
+const FROM_EMAIL = process.env.FROM_EMAIL || 'no-reply@churpay.com';
+
+let mailer = null;
+if (MAIL_HOST && MAIL_PORT && MAIL_USER && MAIL_PASS) {
+  mailer = nodemailer.createTransport({
+    host: MAIL_HOST,
+    port: MAIL_PORT,
+    secure: MAIL_PORT === 465, // true for 465, false for others
+    auth: { user: MAIL_USER, pass: MAIL_PASS },
+  });
+  mailer.verify().then(() => {
+    console.log('[Mail] transporter ready');
+  }).catch(err => {
+    console.warn('[Mail] verify failed:', err?.message || err);
+  });
+} else {
+  console.warn('[Mail] Not configured (set MAIL_HOST, MAIL_PORT, MAIL_USER, MAIL_PASS, FROM_EMAIL)');
+}
+
+async function sendReceiptEmail({ to, amount, reference, status, payerName }) {
+  if (!mailer || !to) return false;
+  try {
+    const subject = `ChurPay receipt — ${status}`;
+    const prettyAmt = isFinite(Number(amount)) ? Number(amount).toFixed(2) : String(amount);
+    const html = `
+      <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">
+        <h2 style="margin:0 0 8px 0;">ChurPay Receipt</h2>
+        <p style="margin:0 0 12px 0; color:#444;">${payerName ? `Hi ${payerName},` : 'Hello,'}</p>
+        <p style="margin:0 0 12px 0;">Thank you. Your payment status is <strong>${status}</strong>.</p>
+        <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;border:1px solid #eee;">
+          <tr><td style="border:1px solid #eee;">Reference</td><td style="border:1px solid #eee;"><code>${reference}</code></td></tr>
+          <tr><td style="border:1px solid #eee;">Amount</td><td style="border:1px solid #eee;">R ${prettyAmt}</td></tr>
+          <tr><td style="border:1px solid #eee;">Status</td><td style="border:1px solid #eee;">${status}</td></tr>
+        </table>
+        <p style="margin:12px 0 0 0; color:#777;">If you have any questions, reply to this email.</p>
+      </div>`;
+    const text = `ChurPay receipt\n\nReference: ${reference}\nAmount: R ${prettyAmt}\nStatus: ${status}\n`;
+    await mailer.sendMail({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      text,
+      html,
+    });
+    console.log('[Mail] receipt sent to', to);
+    return true;
+  } catch (e) {
+    console.warn('[Mail] send failed:', e?.message || e);
+    return false;
+  }
+}
+// ------------------ end Mailer setup ------------------
 app.use((req, res, next) => {
   res.header('Vary', 'Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -684,6 +742,22 @@ app.post("/api/payfast/ipn", async (req, res) => {
       }
     }
 
+    // Send receipt for successful payments (COMPLETE)
+    try {
+      const statusUpper = String(params.payment_status || '').toUpperCase();
+      if (finalOk && statusUpper === 'COMPLETE' && (params.email_address || params.payer_email)) {
+        await sendReceiptEmail({
+          to: params.email_address || params.payer_email,
+          amount: ipnAmount,
+          reference: ref,
+          status: 'COMPLETE',
+          payerName: params.name_first || ''
+        });
+      }
+    } catch (e) {
+      console.warn('[Mail] IPN receipt failed', e?.message || e);
+    }
+
     res.status(200).send("OK");
   } catch (e) {
     console.error("[PayFast][IPN] Error:", e);
@@ -787,6 +861,27 @@ app.post('/api/admin/payments/:id/status', requireAuth, requireAdmin, async (req
     if (!ALLOWED.has(status)) return res.status(400).json({ error: 'bad status' });
     const q = await pool.query('UPDATE payments SET status=$1 WHERE id=$2 RETURNING id, status', [status, id]);
     if (!q.rowCount) return res.status(404).json({ error: 'not found' });
+    // If marked as PAID/COMPLETE, try to send receipt using stored email
+    if (status === 'PAID' || status === 'COMPLETE' || status === 'SUCCESS') {
+      try {
+        const info = await pool.query(
+          'SELECT merchant_reference, amount, payer_email, payer_name FROM payments WHERE id=$1',
+          [id]
+        );
+        if (info.rows.length) {
+          const p = info.rows[0];
+          await sendReceiptEmail({
+            to: p.payer_email,
+            amount: p.amount,
+            reference: p.merchant_reference,
+            status: status,
+            payerName: p.payer_name || ''
+          });
+        }
+      } catch (e) {
+        console.warn('[Mail] admin send receipt failed', e?.message || e);
+      }
+    }
     return res.json({ ok: true, payment: q.rows[0] });
   } catch (e) {
     console.error('[admin/status]', e);
