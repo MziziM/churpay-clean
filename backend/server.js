@@ -212,7 +212,7 @@ function signatureBase(obj, passphrase) {
   const entries = Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== "");
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   let base = entries.map(([k, v]) => `${k}=${phpUrlEncode(v)}`).join("&");
-  if (passphrase) base += `&passphrase=${passphrase}`;
+  if (passphrase) base += `&passphrase=${phpUrlEncode(passphrase)}`;
   return base;
 }
 function md5hex(str) {
