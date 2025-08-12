@@ -233,35 +233,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [detail]);
 const searchRef = useRef(null);
-useEffect(() => {
-  const onKey = (e) => {
-    const tag = (e.target?.tagName || '').toLowerCase();
-    const typing = tag === 'input' || tag === 'textarea';
-    if (!typing && e.key === '/') {
-      e.preventDefault();
-      searchRef.current?.focus();
-    }
-    if (!typing && (e.key === 'r' || e.key === 'R')) {
-      e.preventDefault();
-      if (!loadingPayments) loadPayments();
-    }
-    if (!typing && (e.key === 'e' || e.key === 'E')) {
-      e.preventDefault();
-      const rows = getExportRows();
-      if (rows.length) exportCSV(rows);
-    }
-    if (!typing && e.key === 'ArrowLeft') {
-      e.preventDefault();
-      setPage(p => Math.max(1, p - 1));
-    }
-    if (!typing && e.key === 'ArrowRight') {
-      e.preventDefault();
-      setPage(p => Math.min(totalPages, p + 1));
-    }
-  };
-  window.addEventListener('keydown', onKey);
-  return () => window.removeEventListener('keydown', onKey);
-}, [loadingPayments, totalPages]);
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -691,6 +662,36 @@ useEffect(() => {
     query, statusFilter, dateRange, fromDate, toDate, sortBy, sortDir, pageSize, compact
   });
   const getExportRows = () => (exportScope === 'all' ? payments : filteredPayments);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || '').toLowerCase();
+      const typing = tag === 'input' || tag === 'textarea';
+      if (!typing && e.key === '/') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (!typing && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault();
+        if (!loadingPayments) loadPayments();
+      }
+      if (!typing && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        const rows = getExportRows();
+        if (rows.length) exportCSV(rows);
+      }
+      if (!typing && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setPage((p) => Math.max(1, p - 1));
+      }
+      if (!typing && e.key === 'ArrowRight') {
+        e.preventDefault();
+        setPage((p) => Math.min(totalPages, p + 1));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [loadingPayments, totalPages, exportScope, payments, filteredPayments]);
 
   const isSamePreset = (p) => {
     if (!p) return false;
