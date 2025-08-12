@@ -7,7 +7,54 @@ const { Pool } = pkg;
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+// near the top, after imports
+import { execSync } from 'child_process';
+import os from 'os';
 
+// Add version info once during startup
+let buildInfo = {
+  commit: 'unknown',
+  builtAt: new Date().toISOString(),
+  env: process.env.NODE_ENV || 'development',
+  host: os.hostname()
+};
+
+try {
+  // get short git hash
+  buildInfo.commit = execSync('git rev-parse --short HEAD').toString().trim();
+} catch (err) {
+  console.warn('[Debug] Could not get git commit hash', err.message);
+}
+
+// ... your existing app setup
+
+// DEBUG: list routes (already exists)
+app.get('/api/debug/routes', (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        methods: Object.keys(middleware.route.methods).map(m => m.toUpperCase()),
+        path: middleware.route.path
+      });
+    } else if (middleware.name === 'router') {
+      middleware.handle.stack.forEach((handler) => {
+        if (handler.route) {
+          routes.push({
+            methods: Object.keys(handler.route.methods).map(m => m.toUpperCase()),
+            path: handler.route.path
+          });
+        }
+      });
+    }
+  });
+  res.json({ count: routes.length, routes });
+});
+
+// NEW: version info endpoint
+app.get('/api/debug/version', (req, res) => {
+  res.json(buildInfo);
+});
 const app = express();
 app.use((req, res, next) => {
   res.header('Vary', 'Origin');
@@ -369,7 +416,11 @@ async function validateWithPayFast(params) {
     return false;
   }
 }
-
+async function ensurePaymentMetaCols(client) {
+  // Safe to call repeatedly
+  await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS note text`);
+  await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS tags text[]`);
+}
 const AUTH_JWT_SECRET = process.env.AUTH_JWT_SECRET || 'dev-secret-do-not-use-in-prod';
 function signToken(payload) {
   return jwt.sign(payload, AUTH_JWT_SECRET, { expiresIn: '7d' });
