@@ -179,6 +179,32 @@ const sign = (params) => {
   return sig;
 };
 
+// Server-to-server IPN validation with PayFast (sandbox/live)
+async function validateWithPayFast(params) {
+  try {
+    const mode = (process.env.PAYFAST_MODE || 'sandbox').toLowerCase();
+    const endpoint = mode === 'live'
+      ? 'https://www.payfast.co.za/eng/query/validate'
+      : 'https://sandbox.payfast.co.za/eng/query/validate';
+
+    // Build form body as application/x-www-form-urlencoded
+    const body = signatureBase(params, '').toString(); // same encoding as sent to us (excluding passphrase)
+
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const text = (await r.text()).trim();
+    const ok = r.ok && text.toUpperCase().includes('VALID');
+    if (!ok) console.warn('[PayFast][Validate] Response not VALID:', r.status, text);
+    return ok;
+  } catch (e) {
+    console.error('[PayFast][Validate] Error', e);
+    return false;
+  }
+}
+
 const AUTH_JWT_SECRET = process.env.AUTH_JWT_SECRET || 'dev-secret-do-not-use-in-prod';
 function signToken(payload) {
   return jwt.sign(payload, AUTH_JWT_SECRET, { expiresIn: '7d' });
@@ -257,7 +283,7 @@ app.post('/api/auth/logout', (req, res) => {
   return res.json({ ok: true });
 });
 
-app.post("/api/payfast/initiate", (req, res) => {
+app.post("/api/payfast/initiate", async (req, res) => {
   const mode = (process.env.PAYFAST_MODE || "sandbox").toLowerCase();
   const gateway = mode === "live"
     ? "https://www.payfast.co.za/eng/process"
@@ -269,6 +295,8 @@ app.post("/api/payfast/initiate", (req, res) => {
   const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
 
   const amount = (Number(req.body.amount || 50)).toFixed(2);
+  // Generate a strict merchant reference (we'll validate amount by this later)
+  const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
 
   const pfParams = {
     merchant_id: String(merchant_id || "").trim(),
@@ -278,38 +306,88 @@ app.post("/api/payfast/initiate", (req, res) => {
     return_url: String(`${FRONTEND_URL}/payfast/return`).trim(),
     cancel_url: String(`${FRONTEND_URL}/payfast/cancel`).trim(),
     notify_url: String(`${BACKEND_URL}/api/payfast/ipn`).trim(),
+    // merchant reference we control; PayFast sends it back as m_payment_id in IPN
+    m_payment_id: merchant_reference,
   };
 
-  // Debug logging for PayFast initiation
-  console.log("[PayFast][Init Params]", pfParams);
+  // Best-effort: store the intent so we can strictly validate amount later
+  if (pool) {
+    try {
+      await pool.query(
+        `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [null, Number(amount), 'INITIATED', merchant_reference, null, null]
+      );
+    } catch (e) {
+      console.warn('[PayFast][Init] intent insert failed (non-fatal)', e?.message || e);
+    }
+  }
 
-  // Sign using alphabetically sorted, PHP-encoded values; passphrase is appended only to the base string (not sent as a field)
+  // Sign and redirect
   const signature = sign(pfParams);
   const redirectQuery = `${toSignatureString(pfParams)}&signature=${signature}`;
   const redirectUrl = `${gateway}?${redirectQuery}`;
 
-  console.log("[PayFast][Init RedirectQuery]", redirectQuery);
+  console.log("[PayFast][Init Params]", pfParams);
   console.log("[PayFast][Init RedirectURL]", redirectUrl);
   console.log("[PayFast] mode=%s merchant_id=%s gateway=%s amount=%s", mode, merchant_id, gateway, amount);
-  return res.json({ redirect: redirectUrl });
+  return res.json({ redirect: redirectUrl, merchant_reference });
 });
 
 app.post("/api/payfast/ipn", async (req, res) => {
   try {
+    const configuredMerchantId = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
     // Extract signature and params
     const { signature: receivedSig, ...params } = req.body || {};
     const passphrase = process.env.PAYFAST_PASSPHRASE || "";
-    // Compute base string and signature
+
+    // 1) Basic signature verification
     const base = signatureBase(params, passphrase);
     const computed = md5hex(base);
-    let verified = false;
-    if (receivedSig && receivedSig.toLowerCase() === computed.toLowerCase()) {
-      verified = true;
-      console.log("[PayFast][IPN] Signature verified");
-    } else {
-      console.warn("[PayFast][IPN] Signature mismatch", { receivedSig, computed });
+    let verified = !!(receivedSig && receivedSig.toLowerCase() === computed.toLowerCase());
+    if (!verified) console.warn("[PayFast][IPN] Signature mismatch", { receivedSig, computed });
+
+    // 2) Merchant ID must match
+    if (verified) {
+      const ipnMerchant = String(params.merchant_id || '').trim();
+      if (!ipnMerchant || ipnMerchant !== configuredMerchantId) {
+        console.warn('[PayFast][IPN] Merchant ID mismatch', { ipnMerchant, configuredMerchantId });
+        verified = false;
+      }
     }
-    // Save raw IPN event to ipn_events (best-effort)
+
+    // 3) Server-to-server validation with PayFast
+    if (verified) {
+      const valid = await validateWithPayFast(req.body || {});
+      if (!valid) {
+        console.warn('[PayFast][IPN] Remote validate failed');
+        verified = false;
+      }
+    }
+
+    // 4) Strict amount match vs our stored intent by merchant reference
+    let amountOk = false;
+    let expectedAmount = null;
+    const ipnAmount = Number(params.amount_gross || params.amount || 0);
+    const ref = params.m_payment_id || params.merchant_reference || null;
+
+    if (pool && ref) {
+      try {
+        const { rows } = await pool.query('SELECT amount FROM payments WHERE merchant_reference = $1 ORDER BY created_at DESC LIMIT 1', [ref]);
+        if (rows.length) {
+          expectedAmount = Number(rows[0].amount);
+          // strictly equal to 2dp
+          amountOk = (Number(ipnAmount.toFixed(2)) === Number(expectedAmount.toFixed(2)));
+          if (!amountOk) console.warn('[PayFast][IPN] Amount mismatch', { ref, expectedAmount, ipnAmount });
+        }
+      } catch (e) {
+        console.error('[IPN] amount lookup failed', e);
+      }
+    }
+
+    const finalOk = verified && amountOk;
+
+    // Save raw IPN regardless
     if (pool) {
       try {
         const pfId = params.pf_payment_id || null;
@@ -320,39 +398,33 @@ app.post("/api/payfast/ipn", async (req, res) => {
       } catch (e) {
         console.error("[IPN] DB ipn_events insert error", e);
       }
-      // Upsert into payments if signature verified
-      if (verified) {
-        try {
-          const pfId = params.pf_payment_id || null;
-          const status = String(params.payment_status || "UNKNOWN");
-          const amt = Number(params.amount_gross || params.amount || 0);
-          const merchant_reference = params.merchant_reference || null;
-          const payer_email = params.email_address || params.payer_email || null;
-          const payer_name = params.name_first || params.payer_name || null;
-          await pool.query(
-            `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (pf_payment_id) DO UPDATE
-             SET amount = EXCLUDED.amount,
-                 status = EXCLUDED.status,
-                 merchant_reference = EXCLUDED.merchant_reference,
-                 payer_email = EXCLUDED.payer_email,
-                 payer_name = EXCLUDED.payer_name
-            `,
-            [
-              pfId,
-              isFinite(amt) ? amt : 0,
-              status,
-              merchant_reference,
-              payer_email,
-              payer_name,
-            ]
-          );
-        } catch (e) {
-          console.error("[IPN] payments upsert error", e);
-        }
+    }
+
+    // Upsert payment with final status if checks passed (strict), else mark INVALID
+    if (pool) {
+      try {
+        const pfId = params.pf_payment_id || null;
+        const status = finalOk ? String(params.payment_status || 'UNKNOWN') : 'INVALID';
+        const merchant_reference = ref;
+        const payer_email = params.email_address || params.payer_email || null;
+        const payer_name = params.name_first || params.payer_name || null;
+        const amt = Number(ipnAmount || 0);
+        await pool.query(
+          `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (pf_payment_id) DO UPDATE
+           SET amount = EXCLUDED.amount,
+               status = EXCLUDED.status,
+               merchant_reference = EXCLUDED.merchant_reference,
+               payer_email = EXCLUDED.payer_email,
+               payer_name = EXCLUDED.payer_name`,
+          [pfId, isFinite(amt) ? amt : 0, status, merchant_reference, payer_email, payer_name]
+        );
+      } catch (e) {
+        console.error("[IPN] payments upsert error", e);
       }
     }
+
     res.status(200).send("OK");
   } catch (e) {
     console.error("[PayFast][IPN] Error:", e);
