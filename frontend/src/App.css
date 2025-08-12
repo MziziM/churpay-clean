@@ -659,3 +659,46 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 80%, var(--text) 
   color: inherit;
   border-color: color-mix(in oklab, currentColor, transparent 70%);
 }
+/* === Slide-over Drawer === */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, var(--bg), #000 30%);
+  display: grid;
+  justify-content: end;
+  z-index: 60;
+}
+.drawer {
+  height: 100vh;
+  max-width: 92vw;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  animation: slideIn 200ms ease-out;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.drawer-body { padding: 16px; overflow: auto; }
+.drawer-foot { padding: 12px 16px; border-top: 1px solid var(--line); }
+
+@keyframes slideIn {
+  from { transform: translateX(12px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .detail-grid { grid-template-columns: 1fr; }
+}

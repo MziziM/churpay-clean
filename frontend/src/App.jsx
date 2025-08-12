@@ -703,17 +703,17 @@ if (path === "/login") {
   return <Login />;
 }
 
-function Modal({ open, onClose, children, title }) {
+function Drawer({ open, onClose, children, title, width = 420 }) {
   if (!open) return null;
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e)=>e.stopPropagation()}>
-        <div className="modal-head">
+    <div className="drawer-backdrop" onClick={onClose}>
+      <aside className="drawer" style={{ width }} onClick={(e)=>e.stopPropagation()}>
+        <div className="drawer-head">
           <h3 style={{ margin: 0 }}>{title || "Details"}</h3>
           <button className="btn ghost" onClick={onClose}>Close</button>
         </div>
-        <div className="modal-body">{children}</div>
-      </div>
+        <div className="drawer-body">{children}</div>
+      </aside>
     </div>
   );
 }
@@ -1274,54 +1274,79 @@ if (path === "/settings") {
         </div>
       </div>
 
-      <Modal open={!!detail} onClose={() => setDetail(null)} title={detail ? `Payment #${detail.id}` : ""}>
-        {detail && (
-          <div className="detail-grid">
-            <div>
-              <span className="label">PF Payment ID</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{detail.pf_payment_id || "-"}</span>
-                {detail.pf_payment_id && (
-                  <button className="btn ghost" onClick={() => copyToClipboard(detail.pf_payment_id)}>Copy</button>
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="label">Amount</span>
-              <div>{typeof detail.amount === 'number' ? ZAR.format(detail.amount) : (detail.amount ?? '-')}</div>
-            </div>
-            <div>
-              <span className="label">Status</span>
-              <div>{renderStatus(detail.status)}</div>
-            </div>
-            <div>
-              <span className="label">Created</span>
-              <div>{detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
-            </div>
-            {detail.merchant_reference && (
-              <div>
-                <span className="label">Reference</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>{detail.merchant_reference}</span>
-                  <button className="btn ghost" onClick={() => copyToClipboard(detail.merchant_reference)}>Copy</button>
-                </div>
-              </div>
-            )}
-            {detail.payer_email && (
-              <div>
-                <span className="label">Payer Email</span>
-                <div>{detail.payer_email}</div>
-              </div>
-            )}
-            {detail.payer_name && (
-              <div>
-                <span className="label">Payer Name</span>
-                <div>{detail.payer_name}</div>
-              </div>
+     <Drawer open={!!detail} onClose={() => setDetail(null)} title={detail ? `Payment #${detail.id}` : ""}>
+  {detail && (
+    <>
+      {/* Quick actions */}
+      <div className="row" style={{ gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        {detail.pf_payment_id && (
+          <button className="btn" onClick={() => copyToClipboard(detail.pf_payment_id)} title="Copy PF Payment ID">
+            Copy PF ID
+          </button>
+        )}
+        {detail.merchant_reference && (
+          <button className="btn ghost" onClick={() => copyToClipboard(detail.merchant_reference)} title="Copy Merchant Reference">
+            Copy Reference
+          </button>
+        )}
+        <a
+          className="btn ghost"
+          href={`/?q=${encodeURIComponent(detail.pf_payment_id || detail.merchant_reference || '')}`}
+          title="Find in table"
+        >
+          Find in table
+        </a>
+        <button className="btn ghost" disabled title="Refund (coming soon)">Refund…</button>
+      </div>
+
+      {/* Details grid */}
+      <div className="detail-grid">
+        <div>
+          <span className="label">PF Payment ID</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>{detail.pf_payment_id || "-"}</span>
+            {detail.pf_payment_id && (
+              <button className="btn ghost" onClick={() => copyToClipboard(detail.pf_payment_id)}>Copy</button>
             )}
           </div>
+        </div>
+        <div>
+          <span className="label">Amount</span>
+          <div>{typeof detail.amount === 'number' ? ZAR.format(detail.amount) : (detail.amount ?? '-')}</div>
+        </div>
+        <div>
+          <span className="label">Status</span>
+          <div>{renderStatus(detail.status)}</div>
+        </div>
+        <div>
+          <span className="label">Created</span>
+          <div>{detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
+        </div>
+        {detail.merchant_reference && (
+          <div>
+            <span className="label">Reference</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{detail.merchant_reference}</span>
+              <button className="btn ghost" onClick={() => copyToClipboard(detail.merchant_reference)}>Copy</button>
+            </div>
+          </div>
         )}
-      </Modal>
+        {detail.payer_email && (
+          <div>
+            <span className="label">Payer Email</span>
+            <div>{detail.payer_email}</div>
+          </div>
+        )}
+        {detail.payer_name && (
+          <div>
+            <span className="label">Payer Name</span>
+            <div>{detail.payer_name}</div>
+          </div>
+        )}
+      </div>
+    </>
+  )}
+</Drawer>
       <Toasts toasts={toasts} />
     </div>
   );
