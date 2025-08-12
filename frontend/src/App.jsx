@@ -1,4 +1,53 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+function PayfastReturn() {
+  useEffect(() => {
+    setTimeout(() => {
+      try {
+        window.dispatchEvent(new CustomEvent("payments:refresh"));
+      } catch {}
+    }, 1200);
+  }, []);
+
+  return (
+    <div className="card" style={{ padding: 16, marginTop: 8 }}>
+      <div className="alert ok" style={{ marginBottom: 12 }}>
+        ✅ Payment complete. Welcome back!
+      </div>
+      <div className="row">
+        <a className="btn btn-primary" href="/">
+          View in history
+        </a>
+        <a className="btn ghost" href="/admin">
+          Go to <span aria-hidden>🔒</span>&nbsp;Admin
+        </a>
+      </div>
+      <p className="muted" style={{ marginTop: 10 }}>
+        If your payment isn’t visible yet, it’ll appear shortly after the IPN is received.
+      </p>
+    </div>
+  );
+}
+
+function PayfastCancel() {
+  return (
+    <div className="card" style={{ padding: 16, marginTop: 8 }}>
+      <div className="alert warn" style={{ marginBottom: 12 }}>
+        ⚠️ Payment was cancelled.
+      </div>
+      <div className="row">
+        <a className="btn btn-primary" href="/">
+          Try again
+        </a>
+        <a className="btn ghost" href="/admin">
+          Go to <span aria-hidden>🔒</span>&nbsp;Admin
+        </a>
+      </div>
+      <p className="muted" style={{ marginTop: 10 }}>
+        No money moved. You can start a new payment anytime.
+      </p>
+    </div>
+  );
+}
 import "./App.css";
 import Deck from "./Deck.jsx";
 import Login from "./pages/Login.jsx";
@@ -90,6 +139,12 @@ function PayFastTopUpBox({ defaultAmount = 10, onPay }) {
 }
 
 export default function App() {
+  // Listen for payments:refresh event to reload payments
+  useEffect(() => {
+    const handler = () => loadPayments?.();
+    window.addEventListener("payments:refresh", handler);
+    return () => window.removeEventListener("payments:refresh", handler);
+  }, []);
   // If not provided, default to same-origin
   const apiBase = (import.meta.env.VITE_API_URL || "").trim() || "";
   const APP_ENV = (import.meta.env.VITE_ENV || "").trim().toLowerCase(); // "production" hides Sandbox badge
@@ -678,29 +733,20 @@ if (path === "/settings") {
     );
   }
 
+  // React-router routes for payfast return/cancel
+  // If react-router is not set up, fallback to old path check
   if (path.startsWith("/payfast/return")) {
     return (
       <div className="container">
-        <div className="card">
-          <h1 style={{ marginTop: 0 }}>Payment successful 🎉</h1>
-        <p>We’ll refresh your dashboard in a moment so you can see it.</p>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <a href="/" className="btn">Go now</a>
-          </div>
-        </div>
+        <PayfastReturn />
         <Toasts toasts={toasts} />
       </div>
     );
   }
-
   if (path.startsWith("/payfast/cancel")) {
     return (
       <div className="container">
-        <div className="card">
-          <h1 style={{ marginTop: 0 }}>Payment cancelled</h1>
-          <p>No charges were made. You can try again anytime.</p>
-          <a href="/" className="btn">Back to Home</a>
-        </div>
+        <PayfastCancel />
         <Toasts toasts={toasts} />
       </div>
     );
@@ -755,7 +801,7 @@ if (path === "/settings") {
       </div>
 
       {/* Quick Top-Up (Form POST flow) */}
-      <PayFastTopUpBox defaultAmount={10} />
+      <PayFastTopUpBox defaultAmount={10} onPay={openPayFastForm} />
 
       {/* KPIs */}
       <div
