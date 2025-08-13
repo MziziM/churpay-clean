@@ -434,6 +434,32 @@ app.get('/api/ipn-events', async (req, res) => {
   }
 });
 
+// Get a single payment by ID (and recent related IPN events)
+app.get('/api/payments/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'invalid id' });
+  }
+  try {
+    const { rows } = await pool.query('SELECT * FROM payments WHERE id = $1 LIMIT 1', [id]);
+    const payment = rows[0];
+    if (!payment) return res.status(404).json({ error: 'not found' });
+
+    let ipn = [];
+    try {
+      const r2 = await pool.query(
+        "SELECT id, pf_payment_id, created_at, raw FROM ipn_events WHERE (raw->>'m_payment_id') = $1 OR (raw->>'pf_payment_id') = $2 ORDER BY id DESC LIMIT 20",
+        [String(payment.merchant_reference || ''), String(payment.pf_payment_id || '')]
+      );
+      ipn = r2.rows || [];
+    } catch {}
+
+    return res.json({ payment, ipn });
+  } catch (err) {
+    console.error('[GET /api/payments/:id] error:', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
 
 // --- PayFast signature helpers ---
 function phpUrlEncode(val) {

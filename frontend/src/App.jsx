@@ -1155,28 +1155,44 @@ const loadBackendInfo = async () => {
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
 
-  // Deep links:
-//   /payment/<id>         -> redirects to "/?q=<id>#payments"
-//   /payment/ref/<ref>    -> redirects to "/?q=<ref>#payments"
-if (path.startsWith("/payment/")) {
-  try {
-    const segs = path.split("/").filter(Boolean); // ["payment", ...]
-    let q = "";
-    if (segs[1] === "ref" && segs[2]) {
-      q = decodeURIComponent(segs[2]);
-    } else if (segs[1]) {
-      q = decodeURIComponent(segs[1]); // treat as id or pf id
+  // Handle deep links without a full reload.
+  // Supported:
+  //   /payment/<id>       - treated as numeric id or PF id
+  //   /payment/ref/<ref>  - treated as merchant_reference
+  useEffect(() => {
+    if (!path.startsWith("/payment/")) return;
+
+    try {
+      const segs = path.split("/").filter(Boolean); // ["payment", ...]
+      let q = "";
+      if (segs[1] === "ref" && segs[2]) {
+        q = decodeURIComponent(segs[2]);
+      } else if (segs[1]) {
+        q = decodeURIComponent(segs[1]);
+      }
+
+      // Update URL to the dashboard deep-link format without leaving the SPA
+      const target = q ? `/?q=${encodeURIComponent(q)}#payments` : "/#payments";
+      if (
+        window.location.pathname + window.location.search + window.location.hash !== target
+      ) {
+        history.replaceState({}, "", target);
+      }
+
+      // Seed the search box immediately so the auto-open effect can find it once data loads
+      if (q) {
+        setQuery(q);
+        // Smooth-scroll to the payments table
+        setTimeout(() => {
+          const el = document.getElementById("payments");
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 0);
+      }
+    } catch {
+      history.replaceState({}, "", "/#payments");
     }
-    if (q) {
-      // our dashboard already auto-opens the detail drawer when ?q=... & #payments
-      window.location.replace(`/?q=${encodeURIComponent(q)}#payments`);
-      return null;
-    }
-  } catch {}
-  // fallback home
-  window.location.replace("/#payments");
-  return null;
-}
+    // We do NOT return early here; render continues on the dashboard.
+  }, [path]);
   // Load settings from backend and apply CSS brand
   useEffect(() => {
     let cancelled = false;
