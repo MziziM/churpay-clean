@@ -113,6 +113,25 @@ async function sendReceiptEmail({ to, amount, reference, status }) {
 async function ensureMerchantRefUniqueIndex() {
   if (!pool) return;
   try {
+    // Prefer a real UNIQUE CONSTRAINT (best for ON CONFLICT)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conrelid = 'public.payments'::regclass
+            AND contype = 'u'
+            AND conname = 'payments_merchant_reference_key'
+        ) THEN
+          ALTER TABLE payments
+            ADD CONSTRAINT payments_merchant_reference_key UNIQUE (merchant_reference);
+        END IF;
+      END
+      $$;
+    `);
+
+    // Keep the old partial index around if you want (harmless if both exist)
     await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_merchant_reference
         ON payments(merchant_reference)
@@ -121,6 +140,7 @@ async function ensureMerchantRefUniqueIndex() {
   } catch (e) {
     console.warn('[DB] ensureMerchantRefUniqueIndex failed', e?.message || e);
   }
+
 }
 
 
@@ -148,7 +168,20 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
   const { ref } = req.body || {};
   if (!ref) return res.status(400).json({ error: 'ref required' });
   if (!pool) return res.status(500).json({ error: 'no db' });
-
+let upsert;
+try {
+  upsert = await doUpsert();
+} catch (e) {
+  const msg = (e?.message || '').toLowerCase();
+  const code = e?.code || '';
+  if (msg.includes('no unique or exclusion constraint') || code === '42P10') {
+    console.warn('[admin backfill] missing unique constraint — creating and retrying');
+    await ensureMerchantRefUniqueIndex();
+    upsert = await doUpsert();
+  } else {
+    throw e;
+  }
+}
   try {
     console.log('[admin backfill] START ref=', ref);
 
@@ -469,7 +502,21 @@ if (DATABASE_URL) {
       WHERE merchant_reference IS NOT NULL;
   `,
 },
+
+{
+  version: '005_unique_constraint_merchant_reference',
+  sql: `
+    -- Remove the partial index if it exists (safe)
+    DROP INDEX IF EXISTS idx_payments_merchant_reference;
+
+    -- Add a true UNIQUE CONSTRAINT (works with ON CONFLICT reliably)
+    ALTER TABLE payments
+      ADD CONSTRAINT payments_merchant_reference_key UNIQUE (merchant_reference);
+  `,
+},
       ];
+
+      
       
 
       for (const m of MIGRATIONS) {
