@@ -658,6 +658,14 @@ const sign = (params) => {
   return sig;
 };
 
+// Decide which passphrase to use based on merchant_id + env.
+// PayFast test merchant (10000100) must use NO passphrase.
+function derivePayfastPassphrase(merchantId) {
+  const id = String(merchantId || '').trim();
+  if (id === '10000100') return ''; // force empty on sandbox test account
+  return String(process.env.PAYFAST_PASSPHRASE || '').trim();
+}
+
 // Server-to-server IPN validation with PayFast (sandbox/live)
 async function validateWithPayFast(params) {
   try {
@@ -815,46 +823,32 @@ app.post("/api/payfast/initiate", async (req, res) => {
   }
 
   // Sign and redirect (with optional debug to compare passphrase modes)
-  const passphraseEnv = (process.env.PAYFAST_PASSPHRASE || "").trim();
-  const signBoth = String(process.env.PAYFAST_SIGN_BOTH || '').toLowerCase() === 'true';
+  const passphraseUsed = derivePayfastPassphrase(pfParams.merchant_id);
 
-  const baseWith = signatureBase(pfParams, passphraseEnv);
+  // Single source of truth: compute base/signature with the selected passphrase
+  const baseSelected = signatureBase(pfParams, passphraseUsed);
+  const sigSelected = md5hex(baseSelected);
+  const redirectUrl = `${gateway}?${toSignatureString(pfParams)}&signature=${sigSelected}`;
+
+  // Also compute alternates for logging/diagnostics
+  const baseWith = signatureBase(pfParams, (process.env.PAYFAST_PASSPHRASE || '').trim());
   const sigWith = md5hex(baseWith);
-  const urlWith = `${gateway}?${toSignatureString(pfParams)}&signature=${sigWith}`;
-
   const baseWithout = signatureBase(pfParams, '');
   const sigWithout = md5hex(baseWithout);
-  const urlWithout = `${gateway}?${toSignatureString(pfParams)}&signature=${sigWithout}`;
 
-  // Prefer the signing mode that matches your PayFast dashboard settings.
-  // If PAYFAST_PASSPHRASE is empty (common for sandbox test merchant 10000100),
-  // use the signature without passphrase.
-  const redirectUrl = passphraseEnv ? urlWith : urlWithout;
-
-  console.log("[PayFast][Sign][with-pass] Base:", baseWith, " Sig:", sigWith);
-  console.log("[PayFast][Sign][no-pass]  Base:", baseWithout, " Sig:", sigWithout);
-
-  if (signBoth) {
-    console.log("[PayFast][Init RedirectURL][with-pass]", urlWith);
-    console.log("[PayFast][Init RedirectURL][no-pass] ", urlWithout);
-    return res.json({
-      redirect: urlWith,
-      merchant_reference,
-      debug: {
-        with_passphrase: { base: baseWith, signature: sigWith, url: urlWith },
-        without_passphrase: { base: baseWithout, signature: sigWithout, url: urlWithout }
-      }
-    });
-  }
-
-  const redirectQuery = `${toSignatureString(pfParams)}&signature=${sigWith}`;
-  // keep prior logs and response shape
-  const _unused = redirectQuery; // no-op to retain variable referenced in earlier logs if any
-
+  console.log("[PayFast][Init] passphraseUsed=%s", passphraseUsed ? "(set)" : "(empty)");
+  console.log("[PayFast][Init][baseSelected]", baseSelected);
+  console.log("[PayFast][Init][sigSelected]", sigSelected);
+  console.log("[PayFast][Init][with-pass]  base:", baseWith,  " sig:", sigWith);
+  console.log("[PayFast][Init][no-pass]   base:", baseWithout," sig:", sigWithout);
   console.log("[PayFast][Init Params]", pfParams);
   console.log("[PayFast][Init RedirectURL]", redirectUrl);
   console.log("[PayFast] mode=%s merchant_id=%s gateway=%s amount=%s", mode, merchant_id, gateway, amount);
-  return res.json({ redirect: redirectUrl, merchant_reference });
+
+  return res.json({
+    redirect: redirectUrl,
+    merchant_reference
+  });
 });
 
 // GET /api/payfast/initiate-form
@@ -903,14 +897,13 @@ app.get('/api/payfast/initiate-form', async (req, res) => {
       }
     }
 
-    // Sign with (optional) passphrase to match your PayFast dashboard
-    const passphrase = (process.env.PAYFAST_PASSPHRASE || '').trim();
+    // Sign with passphrase selected by derivePayfastPassphrase (merchant_id aware)
+    const passphrase = derivePayfastPassphrase(pfParams.merchant_id);
     const base = signatureBase(pfParams, passphrase);
     const signature = md5hex(base);
 
     // Debug: show which mode we're using
-    // eslint-disable-next-line no-console
-    console.log('[PayFast][initiate-form] using', passphrase ? 'with-passphrase' : 'no-passphrase', 'signature=', signature);
+    console.log('[PayFast][initiate-form] passphraseUsed=%s signature=%s', passphrase ? '(set)' : '(empty)', signature);
 
     // Build a minimal HTML form that auto-submits
     const inputs = Object.entries({ ...pfParams, signature })
@@ -934,6 +927,47 @@ app.get('/api/payfast/initiate-form', async (req, res) => {
   } catch (e) {
     console.error('[PayFast][initiate-form] error', e);
     return res.status(500).send('Error');
+  }
+});
+
+// GET /api/payfast/signature-preview?amount=10.00
+// Returns the params, base string, and signature used (passphrase-aware) for quick debugging.
+app.get('/api/payfast/signature-preview', async (req, res) => {
+  try {
+    const mode = (process.env.PAYFAST_MODE || 'sandbox').toLowerCase();
+    const merchant_id = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
+    const merchant_key = String(process.env.PAYFAST_MERCHANT_KEY || '').trim();
+    const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
+    const amount = (Number(req.query.amount || 50)).toFixed(2);
+    const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
+
+    const pfParams = {
+      merchant_id,
+      merchant_key,
+      amount,
+      item_name: 'Churpay Top Up',
+      return_url: `${FRONTEND_URL}/payfast/return`,
+      cancel_url: `${FRONTEND_URL}/payfast/cancel`,
+      notify_url: `${BACKEND_URL}/api/payfast/ipn`,
+      m_payment_id: merchant_reference,
+    };
+
+    const passphraseUsed = derivePayfastPassphrase(merchant_id);
+    const base = signatureBase(pfParams, passphraseUsed);
+    const signature = md5hex(base);
+
+    return res.json({
+      mode,
+      merchant_id,
+      passphraseUsed: passphraseUsed ? '(set)' : '(empty)',
+      params: pfParams,
+      base,
+      signature
+    });
+  } catch (e) {
+    console.error('[PayFast][signature-preview] error', e);
+    return res.status(500).json({ error: 'internal' });
   }
 });
 
