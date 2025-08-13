@@ -771,3 +771,8 @@ mark {
   margin-top: 8px;
 }
 .detail-grid .label { color: var(--muted-text); font-size: 12px; }
+
+.btn.danger { background: #ef4444; color: #fff; }
+.btn.danger:hover { filter: brightness(0.95); }
+.input { padding: 8px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 8px; }
+.muted { color: #6b7280; font-size: 12px; }

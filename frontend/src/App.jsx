@@ -123,6 +123,9 @@ function PaymentDetailPage({ apiBase }) {
   const [row, setRow] = useState(null);
   const [err, setErr] = useState("");
   const [ipn, setIpn] = useState(null); // fallback: IPN event if no payment row exists
+  const [backfilling, setBackfilling] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [tagDraft, setTagDraft] = useState('');
 
   // Derive ref from path /payment/ref/:ref/view OR fallback to ?ref=
   const refFromPath = () => {
@@ -139,28 +142,59 @@ function PaymentDetailPage({ apiBase }) {
     }
   };
 
-  // add near the top of PaymentDetailPage
-const [backfilling, setBackfilling] = useState(false);
-const doBackfill = async () => {
-  if (!ref) return;
-  try {
-    setBackfilling(true);
-    const r = await fetch(`${apiBase}/api/admin/backfill-from-ipn`, {
+  const doBackfill = async () => {
+    if (!ref) return;
+    try {
+      setBackfilling(true);
+      const r = await fetch(`${apiBase}/api/admin/backfill-from-ipn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ref })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'Backfill failed'); return; }
+      alert('Backfilled. Reloading…');
+      window.location.href = `/payment/ref/${encodeURIComponent(ref)}/view`;
+    } catch {
+      alert('Network error');
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
+  async function adminUpdateStatus(id, status) {
+    const res = await fetch(`${apiBase}/api/admin/payments/${id}/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ ref })
+      body: JSON.stringify({ status })
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { alert(j.error || 'Backfill failed'); return; }
-    alert('Backfilled. Reloading…');
-    window.location.href = `/payment/ref/${encodeURIComponent(ref)}/view`;
-  } catch {
-    alert('Network error');
-  } finally {
-    setBackfilling(false);
+    if (!res.ok) throw new Error('Failed to update status');
+    return res.json();
   }
-};
+
+  async function adminAddNote(id, note) {
+    const res = await fetch(`${apiBase}/api/admin/payments/${id}/note`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ note })
+    });
+    if (!res.ok) throw new Error('Failed to add note');
+    return res.json();
+  }
+
+  async function adminAddTag(id, tag) {
+    const res = await fetch(`${apiBase}/api/admin/payments/${id}/tag`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tag })
+    });
+    if (!res.ok) throw new Error('Failed to add tag');
+    return res.json();
+  }
 
   const ref = refFromPath();
 
@@ -303,6 +337,131 @@ const doBackfill = async () => {
               <div>
                 <span className="label">Created</span>
                 <div>{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</div>
+              </div>
+            </div>
+
+            {/* Admin Actions card */}
+            <div className="card" style={{ marginTop: 12 }}>
+              <div className="card-title">Admin Actions</div>
+
+              <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  className="btn"
+                  onClick={async () => {
+                    try {
+                      await adminUpdateStatus(row.id, 'PAID');
+                      alert('Marked as PAID');
+                      const r = await fetch(`${apiBase}/api/payments/${row.id}`, { credentials: 'include' });
+                      const j = await r.json();
+                      setRow(j.payment || row);
+                    } catch (e) {
+                      alert(e.message || 'Failed to update');
+                    }
+                  }}
+                  title="Force mark payment as PAID"
+                >
+                  Mark Paid
+                </button>
+
+                <button
+                  className="btn danger"
+                  onClick={async () => {
+                    try {
+                      await adminUpdateStatus(row.id, 'FAILED');
+                      alert('Marked as FAILED');
+                      const r = await fetch(`${apiBase}/api/payments/${row.id}`, { credentials: 'include' });
+                      const j = await r.json();
+                      setRow(j.payment || row);
+                    } catch (e) {
+                      alert(e.message || 'Failed to update');
+                    }
+                  }}
+                  title="Force mark payment as FAILED"
+                >
+                  Mark Failed
+                </button>
+              </div>
+
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Add a note…"
+                  value={noteDraft ?? ''}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  style={{ flex: 1, minWidth: 240 }}
+                />
+                <button
+                  className="btn ghost"
+                  onClick={async () => {
+                    if (!noteDraft || !noteDraft.trim()) return;
+                    try {
+                      await adminAddNote(row.id, noteDraft.trim());
+                      alert('Note added');
+                      setNoteDraft('');
+                      const r = await fetch(`${apiBase}/api/payments/${row.id}`, { credentials: 'include' });
+                      const j = await r.json();
+                      setRow(j.payment || row);
+                    } catch (e) {
+                      alert(e.message || 'Failed to add note');
+                    }
+                  }}
+                >
+                  Add note
+                </button>
+              </div>
+
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Add a tag (press Add)"
+                  value={tagDraft ?? ''}
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  style={{ width: 240 }}
+                />
+                <button
+                  className="btn ghost"
+                  onClick={async () => {
+                    if (!tagDraft || !tagDraft.trim()) return;
+                    try {
+                      await adminAddTag(row.id, tagDraft.trim());
+                      alert('Tag added');
+                      setTagDraft('');
+                      const r = await fetch(`${apiBase}/api/payments/${row.id}`, { credentials: 'include' });
+                      const j = await r.json();
+                      setRow(j.payment || row);
+                    } catch (e) {
+                      alert(e.message || 'Failed to add tag');
+                    }
+                  }}
+                >
+                  Add tag
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                {row.note ? (
+                  <div>
+                    <div className="muted">Note</div>
+                    <div>{row.note}</div>
+                  </div>
+                ) : null}
+
+                {row.tags ? (
+                  <div style={{ marginTop: 6 }}>
+                    <div className="muted">Tags</div>
+                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                      {String(row.tags)
+                        .split(',')
+                        .map((t) => t.trim())
+                        .filter(Boolean)
+                        .map((t) => (
+                          <span key={t} className="badge info">{t}</span>
+                        ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </>
@@ -500,8 +659,6 @@ function Toasts({ toasts }) {
     </div>
   );
 }
-
-
 
 // --- Small util: safe JSON (helps when backend returns HTML errors) ---
 async function safeJson(response) {
