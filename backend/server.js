@@ -34,7 +34,13 @@ try {
 }
 
 
+
 const app = express();
+// Global middleware must come before routes (parsers, cookies, logging)
+app.use(morgan("tiny"));
+app.use(express.urlencoded({ extended: false })); // IPN (form-encoded)
+app.use(express.json());
+app.use(cookieParser());
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -101,7 +107,57 @@ async function sendReceiptEmail({ to, amount, reference, status }) {
   }
 }
 
+// POST /api/admin/backfill-from-ipn
+// Body: { ref: "m_payment_id or merchant_reference" }
+app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
+  const { ref } = req.body || {};
+  if (!ref) return res.status(400).json({ error: 'ref required' });
+  if (!pool) return res.status(500).json({ error: 'no db' });
 
+  try {
+    // find latest IPN for that ref
+    const ipn = await pool.query(
+      `SELECT id, pf_payment_id, status, created_at, raw
+         FROM ipn_events
+        WHERE (raw->>'m_payment_id') = $1
+           OR (raw->>'merchant_reference') = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [ref]
+    );
+    if (ipn.rowCount === 0) {
+      return res.status(404).json({ error: 'no ipn for ref' });
+    }
+    const ev = ipn.rows[0];
+    const raw = ev.raw || {};
+    const amount = Number(raw.amount_gross || raw.amount || 0) || 0;
+    const payerName = raw.name_first && raw.name_last ? `${raw.name_first} ${raw.name_last}` : (raw.name_first || null);
+    const payerEmail = raw.email_address || null;
+    const status = (raw.payment_status || 'PENDING').toString().toUpperCase().includes('COMPLETE') ? 'PAID' : 'PENDING';
+    const pfId = raw.pf_payment_id || ev.pf_payment_id || null;
+    const merchantRef = raw.m_payment_id || raw.merchant_reference || ref;
+
+    // upsert by merchant_reference
+    const upsert = await pool.query(
+      `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (merchant_reference)
+       DO UPDATE SET
+         pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
+         amount        = CASE WHEN payments.amount IS NULL OR payments.amount = 0 THEN EXCLUDED.amount ELSE payments.amount END,
+         status        = EXCLUDED.status,
+         payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
+         payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)
+       RETURNING *`,
+      [pfId, amount, status, merchantRef, payerEmail, payerName]
+    );
+
+    return res.json({ ok: true, payment: upsert.rows[0] });
+  } catch (e) {
+    console.error('[admin backfill-from-ipn] error', e);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
 
 // ------------------ end Mailer setup ------------------
 app.use((req, res, next) => {
@@ -190,11 +246,6 @@ app.get('/api/debug/version', (req, res) => {
 });
 
 // other middleware and routes below...
-
-app.use(morgan("tiny"));
-app.use(express.urlencoded({ extended: false })); // for IPN (form-encoded)
-app.use(express.json());
-app.use(cookieParser());
 // -------------------- Settings API --------------------
 let APP_SETTINGS = {
   brandColor: process.env.BRAND_COLOR || "#6b4fff",
@@ -503,8 +554,10 @@ async function validateWithPayFast(params) {
       ? 'https://www.payfast.co.za/eng/query/validate'
       : 'https://sandbox.payfast.co.za/eng/query/validate';
 
-    // Build form body as application/x-www-form-urlencoded
-    const body = signatureBase(params, '').toString(); // same encoding as sent to us (excluding passphrase)
+    // Exclude signature from the postback per PayFast spec
+    const { signature: _omit, ...withoutSig } = params || {};
+    // Build form body using PHP-style encoding, *without* passphrase and *without* signature
+    const body = signatureBase(withoutSig, '');
 
     const r = await fetch(endpoint, {
       method: 'POST',
