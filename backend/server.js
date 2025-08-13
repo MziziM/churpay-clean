@@ -11,6 +11,18 @@ import nodemailer from 'nodemailer';
 import { execSync } from 'child_process';
 import os from 'os';
 
+/**
+ * Ensure `fetch` exists in Node environments that don't ship it natively.
+ * Render can run different Node versions; Node < 18 doesn't have global fetch.
+ */
+let _fetch = globalThis.fetch;
+if (typeof _fetch === 'undefined') {
+  const mod = await import('node-fetch');
+  _fetch = mod.default;
+  globalThis.fetch = _fetch;
+  console.log('[Init] node-fetch polyfill loaded');
+}
+
 import { readFileSync } from 'fs';
 const appPkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url)));
 
@@ -625,34 +637,59 @@ app.get('/api/payments/:id', async (req, res) => {
 });
 
 // --- PayFast signature helpers ---
-function phpUrlEncode(val) {
-  // Use rawurlencode semantics: spaces => %20 (NOT +).
-  // PayFast engine appears to recompute signatures on %20 style encoding.
-  const s = String(val ?? "");
-  return encodeURIComponent(s)
-    // DO NOT replace %20 with '+'
-    .replace(/!/g, "%21")
-    .replace(/\*/g, "%2A")
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29")
-    .replace(/~/g, "%7E");
-}
-
-// Note: Uses PHP rawurlencode semantics (spaces encoded as %20, not +)
+// Build PayFast signature base string using strict PHP-style encoding (spaces as '+').
+// - Removes empty/undefined/null values
+// - Sorts keys ascending
+// - Encodes *values* exactly like PHP's urlencode (space => '+')
+// - Appends passphrase (if provided) using the same encoding rules
 function signatureBase(obj, passphrase) {
-  // Remove empty values and sort keys ascending
-  const entries = Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== "");
+  // 1) Remove empty values and sort keys
+  const entries = Object.entries(obj || {})
+    .filter(([_, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => [String(k), String(v)]);
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  let base = entries.map(([k, v]) => `${k}=${phpUrlEncode(v)}`).join("&");
-  if (passphrase) base += `&passphrase=${phpUrlEncode(passphrase)}`;
+
+  // 2) PHP-style encoder: encodeURIComponent then replace %20 -> '+'
+  //    PayFast recomputes signature with PHP's urlencode, which uses '+'.
+  const phpEncode = (s) =>
+    encodeURIComponent(s)
+      .replace(/%20/g, '+')
+      // Match PHP urlencode nuances (keep as close to PHP as possible):
+      .replace(/!/g, '%21')
+      .replace(/'/g, '%27')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29')
+      .replace(/\*/g, '%2A');
+
+  // 3) Build query string "k=v" joined with '&'
+  let base = entries.map(([k, v]) => `${k}=${phpEncode(v)}`).join('&');
+
+  // 4) Append passphrase (if any) using the same encoding
+  if (passphrase) {
+    base += `&passphrase=${phpEncode(passphrase)}`;
+  }
   return base;
 }
 function md5hex(str) {
   return crypto.createHash("md5").update(str).digest("hex");
 }
 
-// Backward compatibility for existing sign/toSignatureString usages
-const toSignatureString = (obj) => signatureBase(obj, "");
+// Backward compatibility for existing sign/toSignatureString usages (no passphrase)
+const toSignatureString = (obj = {}) => {
+  const entries = Object.entries(obj || {})
+    .filter(([_, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => [String(k), String(v)]);
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const phpEncode = (s) =>
+    encodeURIComponent(s)
+      .replace(/%20/g, '+')
+      .replace(/!/g, '%21')
+      .replace(/'/g, '%27')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29')
+      .replace(/\*/g, '%2A');
+  return entries.map(([k, v]) => `${k}=${phpEncode(v)}`).join('&');
+};
 const sign = (params) => {
   const passphrase = (process.env.PAYFAST_PASSPHRASE || "").trim();
   const base = signatureBase(params, passphrase);
@@ -682,7 +719,7 @@ async function validateWithPayFast(params) {
     // Build form body using PHP-style encoding, *without* passphrase and *without* signature
     const body = signatureBase(withoutSig, '');
 
-    const r = await fetch(endpoint, {
+    const r = await _fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
@@ -959,6 +996,8 @@ app.get('/api/payfast/signature-preview', async (req, res) => {
     const passphraseUsed = derivePayfastPassphrase(merchant_id);
     const base = signatureBase(pfParams, passphraseUsed);
     const signature = md5hex(base);
+    // Insert: compute PHP-style query string (no passphrase)
+    const query = toSignatureString(pfParams);
 
     return res.json({
       mode,
@@ -966,11 +1005,75 @@ app.get('/api/payfast/signature-preview', async (req, res) => {
       passphraseUsed: passphraseUsed ? '(set)' : '(empty)',
       params: pfParams,
       base,
-      signature
+      signature,
+      query
     });
   } catch (e) {
     console.error('[PayFast][signature-preview] error', e);
     return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// GET /api/payfast/diagnose?amount=10.00
+// Server-to-server probe: builds params, signs, POSTS to PayFast, and returns what happened.
+// This helps catch any encoding differences between your shell and the backend.
+app.get('/api/payfast/diagnose', async (req, res) => {
+  try {
+    const mode = (process.env.PAYFAST_MODE || 'sandbox').toLowerCase();
+    const gateway = mode === 'live'
+      ? 'https://www.payfast.co.za/eng/process'
+      : 'https://sandbox.payfast.co.za/eng/process';
+
+    const merchant_id = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
+    const merchant_key = String(process.env.PAYFAST_MERCHANT_KEY || '').trim();
+    const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.churpay.com';
+    const BACKEND_URL = process.env.BACKEND_URL || 'https://api.churpay.com';
+
+    const amount = (Number(req.query.amount || 50)).toFixed(2);
+    const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
+
+    const pfParams = {
+      merchant_id,
+      merchant_key,
+      amount,
+      item_name: 'Churpay Top Up',
+      return_url: `${FRONTEND_URL}/payfast/return`,
+      cancel_url: `${FRONTEND_URL}/payfast/cancel`,
+      notify_url: `${BACKEND_URL}/api/payfast/ipn`,
+      m_payment_id: merchant_reference,
+    };
+
+    // sign
+    const passphrase = derivePayfastPassphrase(merchant_id);
+    const base = signatureBase(pfParams, passphrase);
+    const signature = md5hex(base);
+
+    // payload that will be sent (PHP-style encoding, no passphrase included in fields)
+    const query = toSignatureString(pfParams);
+    const payload = `${query}&signature=${signature}`;
+
+    // POST to PayFast
+    const r = await _fetch(gateway, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: payload,
+    });
+    const text = await r.text();
+
+    return res.status(200).json({
+      mode,
+      merchant_id,
+      passphraseUsed: passphrase ? '(set)' : '(empty)',
+      params: pfParams,
+      base,
+      signature,
+      payload,
+      gatewayStatus: r.status,
+      gatewayResponsePreview: text.slice(0, 500),
+    });
+  } catch (e) {
+    console.error('[PayFast][diagnose] error', e);
+    return res.status(500).json({ error: 'internal', detail: e?.message || String(e) });
   }
 });
 
