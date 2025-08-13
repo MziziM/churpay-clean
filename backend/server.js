@@ -514,6 +514,23 @@ if (DATABASE_URL) {
       ADD CONSTRAINT payments_merchant_reference_key UNIQUE (merchant_reference);
   `,
 },
+
+{
+  version: '005_uq_payments_merchant_reference',
+  sql: `
+    -- Add a full UNIQUE constraint so "ON CONFLICT (merchant_reference)" works.
+    -- (Allows multiple NULLs; enforces uniqueness for non-NULLs.)
+    DO $$
+    BEGIN
+      ALTER TABLE payments
+        ADD CONSTRAINT uq_payments_merchant_reference UNIQUE (merchant_reference);
+    EXCEPTION
+      WHEN duplicate_object THEN
+        -- already exists, ignore
+        NULL;
+    END $$;
+  `,
+},
       ];
 
       
