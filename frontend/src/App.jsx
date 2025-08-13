@@ -100,6 +100,7 @@ function EmailTools() {
   );
 }
 
+
 // --- IPN Events Page ---
 function IpnEventsPage({ apiBase, backendInfo }) {
   const [events, setEvents] = useState([]);
@@ -240,12 +241,12 @@ function IpnEventsPage({ apiBase, backendInfo }) {
                     <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       {ref && (
                         <a
-  className="btn ghost"
-  href={`/payment/ref/${encodeURIComponent(ref)}`}
-  title="Open this payment on the dashboard"
->
-  View payment
-</a>
+                          className="btn ghost"
+                          href={`/payment/ref/${encodeURIComponent(ref)}`}
+                          title="Open this payment on the dashboard"
+                        >
+                          View payment
+                        </a>
                       )}
                       <button className="btn ghost" onClick={() => copyJson(ev.raw || ev)} title="Copy raw JSON">Copy JSON</button>
                       <button className="btn" onClick={() => toggleExpand(ev.id)} title={isOpen ? 'Hide raw' : 'Show raw'}>
@@ -272,7 +273,6 @@ function IpnEventsPage({ apiBase, backendInfo }) {
     </div>
   );
 }
-
 // (Test email UI lives in Admin.jsx)
 // --- Toasts UI (aria-live for accessibility) ---
 function Toasts({ toasts }) {
@@ -388,6 +388,7 @@ export default function App() {
   const nextId = useRef(1);
 
   const [copied, setCopied] = useState({});
+  const [pendingOpenRef, setPendingOpenRef] = useState(null);
   // Backend base URL (Vite env for prod, empty for same-origin in dev)
   const API_BASE = (import.meta?.env?.VITE_API_URL || '').replace(/\/$/, '');
   const [lastRefreshAt, setLastRefreshAt] = useState(0); // timestamp of last successful refresh
@@ -750,6 +751,20 @@ const loadBackendInfo = async () => {
       setLastRefreshAt(Date.now());
       try { window.churpayLog && window.churpayLog('info', 'Loaded payments from API', { count: rows.length }); } catch {}
       pushToast("ok", `Payments refreshed (${rows.length})`, "Success");
+      // If we were asked to open a specific ref, try now that rows are loaded
+      try {
+        if (pendingOpenRef) {
+          const match =
+            rows.find(p =>
+              String(p.merchant_reference || '').toLowerCase() === pendingOpenRef.toLowerCase()
+            ) ||
+            rows.find(p =>
+              String(p.pf_payment_id || '').toLowerCase() === pendingOpenRef.toLowerCase()
+            );
+          if (match) setDetail(match);
+          setPendingOpenRef(null);
+        }
+      } catch {}
     } catch (e) {
       // Fallback to local exported JSON
       try {
@@ -766,6 +781,20 @@ const loadBackendInfo = async () => {
         else if (rows2[0]?.created_at) setCacheUpdatedAt(rows2[0].created_at);
         try { window.churpayLog && window.churpayLog('warn', 'Loaded payments from local cache', { count: rows2.length, cacheUpdatedAt: j2?.meta?.updated_at || j2?.updated_at || null }); } catch {}
         pushToast("warn", `Loaded ${rows2.length} from local cache.`, "Offline mode");
+        // If we were asked to open a specific ref, try now with fallback rows
+        try {
+          if (pendingOpenRef) {
+            const match =
+              rows2.find(p =>
+                String(p.merchant_reference || '').toLowerCase() === pendingOpenRef.toLowerCase()
+              ) ||
+              rows2.find(p =>
+                String(p.pf_payment_id || '').toLowerCase() === pendingOpenRef.toLowerCase()
+              );
+            if (match) setDetail(match);
+            setPendingOpenRef(null);
+          }
+        } catch {}
       } catch (e2) {
         try { window.churpayLog && window.churpayLog('error', 'Payments load failed (API & cache)', { apiError: String(e?.message || e), cacheError: String(e2?.message || e2) }); } catch {}
         pushToast("err", "Could not load payments (API & local cache failed).");
