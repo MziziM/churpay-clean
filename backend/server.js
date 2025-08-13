@@ -651,7 +651,7 @@ function md5hex(str) {
 // Backward compatibility for existing sign/toSignatureString usages
 const toSignatureString = (obj) => signatureBase(obj, "");
 const sign = (params) => {
-  const passphrase = process.env.PAYFAST_PASSPHRASE || "";
+  const passphrase = (process.env.PAYFAST_PASSPHRASE || "").trim();
   const base = signatureBase(params, passphrase);
   const sig = md5hex(base);
   console.log("[PayFast][Sign] Base:", base, " Sig:", sig);
@@ -815,7 +815,7 @@ app.post("/api/payfast/initiate", async (req, res) => {
   }
 
   // Sign and redirect (with optional debug to compare passphrase modes)
-  const passphraseEnv = process.env.PAYFAST_PASSPHRASE || "";
+  const passphraseEnv = (process.env.PAYFAST_PASSPHRASE || "").trim();
   const signBoth = String(process.env.PAYFAST_SIGN_BOTH || '').toLowerCase() === 'true';
 
   const baseWith = signatureBase(pfParams, passphraseEnv);
@@ -827,8 +827,9 @@ app.post("/api/payfast/initiate", async (req, res) => {
   const urlWithout = `${gateway}?${toSignatureString(pfParams)}&signature=${sigWithout}`;
 
   // Prefer the signing mode that matches your PayFast dashboard settings.
-  // Default behavior keeps using the env passphrase (same as before)
-  const redirectUrl = urlWith;
+  // If PAYFAST_PASSPHRASE is empty (common for sandbox test merchant 10000100),
+  // use the signature without passphrase.
+  const redirectUrl = passphraseEnv ? urlWith : urlWithout;
 
   console.log("[PayFast][Sign][with-pass] Base:", baseWith, " Sig:", sigWith);
   console.log("[PayFast][Sign][no-pass]  Base:", baseWithout, " Sig:", sigWithout);
@@ -903,9 +904,13 @@ app.get('/api/payfast/initiate-form', async (req, res) => {
     }
 
     // Sign with (optional) passphrase to match your PayFast dashboard
-    const passphrase = process.env.PAYFAST_PASSPHRASE || '';
+    const passphrase = (process.env.PAYFAST_PASSPHRASE || '').trim();
     const base = signatureBase(pfParams, passphrase);
     const signature = md5hex(base);
+
+    // Debug: show which mode we're using
+    // eslint-disable-next-line no-console
+    console.log('[PayFast][initiate-form] using', passphrase ? 'with-passphrase' : 'no-passphrase', 'signature=', signature);
 
     // Build a minimal HTML form that auto-submits
     const inputs = Object.entries({ ...pfParams, signature })
