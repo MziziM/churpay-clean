@@ -763,3 +763,11 @@ mark {
 .link { color: var(--brand, #6b4fff); text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .table-wrap { overflow: auto; }
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.detail-grid .label { color: var(--muted-text); font-size: 12px; }

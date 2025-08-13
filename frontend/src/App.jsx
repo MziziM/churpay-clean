@@ -100,30 +100,13 @@ function EmailTools() {
   );
 }
 
+// --- Payment detail page (standalone, no react-router) ---
 function PaymentDetailPage({ apiBase }) {
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState(null);
   const [err, setErr] = useState("");
 
-  const ZAR = useMemo(
-    () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
-    []
-  );
-
-  const renderStatus = (status) => {
-    const s = String(status || "").toUpperCase();
-    if (s.includes("COMPLETE") || s === "SUCCESS" || s === "PAID") {
-      return <span className="badge badge-ok">✔︎ Complete</span>;
-    }
-    if (s.includes("FAIL") || s.includes("ERROR")) {
-      return <span className="badge badge-err">✖︎ Failed</span>;
-    }
-    return <span className="badge badge-warn">• Pending</span>;
-  };
-
-  const copyText = (t) => navigator.clipboard.writeText(String(t || "")).catch(()=>{});
-
-  // Get ref from /payment/ref/:ref/view OR ?ref=
+  // Derive ref from path /payment/ref/:ref/view OR fallback to ?ref=
   const refFromPath = () => {
     try {
       const { pathname, search } = window.location;
@@ -133,7 +116,9 @@ function PaymentDetailPage({ apiBase }) {
       }
       const url = new URL(window.location.href);
       return url.searchParams.get("ref") || "";
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   };
 
   const ref = refFromPath();
@@ -145,7 +130,7 @@ function PaymentDetailPage({ apiBase }) {
         setLoading(true);
         setErr("");
         const r = await fetch(`${apiBase}/api/payments?ref=${encodeURIComponent(ref)}`, { cache: "no-store" });
-        const j = await r.json().catch(()=>[]);
+        const j = await r.json().catch(() => []);
         const rows = Array.isArray(j) ? j : (j.rows || []);
         if (!gone) setRow(rows[0] || null);
       } catch (e) {
@@ -157,6 +142,15 @@ function PaymentDetailPage({ apiBase }) {
     return () => { gone = true; };
   }, [apiBase, ref]);
 
+  const ZARfmt = useMemo(() => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }), []);
+  const renderStatusLocal = (status) => {
+    const s = String(status || "").toUpperCase();
+    if (s.includes("COMPLETE") || s === "SUCCESS" || s === "PAID") return <span className="badge badge-ok">✔︎ Complete</span>;
+    if (s.includes("FAIL") || s.includes("ERROR")) return <span className="badge badge-err">✖︎ Failed</span>;
+    return <span className="badge badge-warn">• Pending</span>;
+  };
+  const copyText = (t) => navigator.clipboard.writeText(String(t || "")).catch(() => {});
+
   return (
     <div className="container">
       <div className="topbar" style={{ boxShadow: '0 1px 0 var(--line)' }}>
@@ -165,7 +159,7 @@ function PaymentDetailPage({ apiBase }) {
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h2 style={{marginTop:0}}>Payment Details</h2>
+        <h2 style={{ marginTop: 0 }}>Payment Details</h2>
         {!ref ? (
           <div className="alert warn">Missing reference.</div>
         ) : loading ? (
@@ -176,12 +170,12 @@ function PaymentDetailPage({ apiBase }) {
           <div className="alert warn">No payment found for <code>{ref}</code>.</div>
         ) : (
           <>
-            <div className="row" style={{ gap:8, flexWrap:'wrap', marginBottom:8 }}>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
               {row.pf_payment_id && (
-                <button className="btn" onClick={()=>copyText(row.pf_payment_id)} title="Copy PF Payment ID">Copy PF ID</button>
+                <button className="btn" onClick={() => copyText(row.pf_payment_id)} title="Copy PF Payment ID">Copy PF ID</button>
               )}
               {row.merchant_reference && (
-                <button className="btn ghost" onClick={()=>copyText(row.merchant_reference)} title="Copy merchant reference">Copy Ref</button>
+                <button className="btn ghost" onClick={() => copyText(row.merchant_reference)} title="Copy merchant reference">Copy Ref</button>
               )}
               <a className="btn ghost" href={`/?q=${encodeURIComponent(row.pf_payment_id || row.merchant_reference || '')}#payments`}>Find in table</a>
             </div>
@@ -197,11 +191,11 @@ function PaymentDetailPage({ apiBase }) {
               </div>
               <div>
                 <span className="label">Amount</span>
-                <div>{typeof row.amount === 'number' ? ZAR.format(row.amount) : (row.amount ?? '-')}</div>
+                <div>{typeof row.amount === 'number' ? ZARfmt.format(row.amount) : (row.amount ?? '-')}</div>
               </div>
               <div>
                 <span className="label">Status</span>
-                <div>{renderStatus(row.status)}</div>
+                <div>{renderStatusLocal(row.status)}</div>
               </div>
               <div>
                 <span className="label">Payer</span>
@@ -218,6 +212,8 @@ function PaymentDetailPage({ apiBase }) {
     </div>
   );
 }
+
+
 
 // --- IPN Events Page ---
 function IpnEventsPage({ apiBase, backendInfo }) {
