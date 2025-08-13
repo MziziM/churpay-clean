@@ -856,6 +856,82 @@ app.post("/api/payfast/initiate", async (req, res) => {
   return res.json({ redirect: redirectUrl, merchant_reference });
 });
 
+// GET /api/payfast/initiate-form
+// Usage: /api/payfast/initiate-form?amount=10.00
+// Renders a tiny auto-submitting HTML form that POSTs to PayFast (recommended path)
+app.get('/api/payfast/initiate-form', async (req, res) => {
+  try {
+    const mode = (process.env.PAYFAST_MODE || 'sandbox').toLowerCase();
+    const gateway = mode === 'live'
+      ? 'https://www.payfast.co.za/eng/process'
+      : 'https://sandbox.payfast.co.za/eng/process';
+
+    const merchant_id = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
+    const merchant_key = String(process.env.PAYFAST_MERCHANT_KEY || '').trim();
+
+    const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
+
+    // amount can come from query (?amount=10.00), default to 50
+    const amount = (Number(req.query.amount || 50)).toFixed(2);
+
+    // Generate our strict merchant reference
+    const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
+
+    const pfParams = {
+      merchant_id,
+      merchant_key,
+      amount,
+      item_name: 'Churpay Top Up',
+      return_url: `${FRONTEND_URL}/payfast/return`,
+      cancel_url: `${FRONTEND_URL}/payfast/cancel`,
+      notify_url: `${BACKEND_URL}/api/payfast/ipn`,
+      m_payment_id: merchant_reference,
+    };
+
+    // Persist INITIATED intent for strict amount match (best-effort)
+    if (pool) {
+      try {
+        await pool.query(
+          `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [null, Number(amount), 'INITIATED', merchant_reference, null, null]
+        );
+      } catch (e) {
+        console.warn('[PayFast][Init-Form] intent insert failed (non-fatal)', e?.message || e);
+      }
+    }
+
+    // Sign with (optional) passphrase to match your PayFast dashboard
+    const passphrase = process.env.PAYFAST_PASSPHRASE || '';
+    const base = signatureBase(pfParams, passphrase);
+    const signature = md5hex(base);
+
+    // Build a minimal HTML form that auto-submits
+    const inputs = Object.entries({ ...pfParams, signature })
+      .map(([k, v]) => `<input type="hidden" name="${k}" value="${String(v)}">`)
+      .join('');
+
+    const html = `<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Redirecting to PayFast…</title></head>
+  <body>
+    <form id="pf" method="post" action="${gateway}">
+      ${inputs}
+      <noscript><button type="submit">Continue to PayFast</button></noscript>
+    </form>
+    <script>document.getElementById('pf').submit();</script>
+  </body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(html);
+  } catch (e) {
+    console.error('[PayFast][initiate-form] error', e);
+    return res.status(500).send('Error');
+  }
+});
+
 app.post('/api/admin/test-email', requireAuth, requireAdmin, async (req, res) => {
   try {
     const to = (req.body && req.body.to) || TEST_RECEIPT_TO || '';
