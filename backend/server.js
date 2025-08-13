@@ -123,6 +123,25 @@ async function ensureMerchantRefUniqueIndex() {
   }
 }
 
+
+// Admin: ensure important indexes exist (idempotent)
+app.post('/api/admin/ensure-indexes', requireAuth, requireAdmin, async (req, res) => {
+  if (!pool) return res.status(500).json({ error: 'no db' });
+  try {
+    await ensureMerchantRefUniqueIndex();
+    // Report back what we have
+    const q = await pool.query(
+      `SELECT indexname, indexdef
+         FROM pg_indexes
+        WHERE tablename='payments' AND indexname='idx_payments_merchant_reference'`
+    );
+    return res.json({ ok: true, indexes: q.rows });
+  } catch (e) {
+    console.error('[admin ensure-indexes]', e);
+    return res.status(500).json({ error: 'internal', detail: e?.message || String(e) });
+  }
+});
+
 // POST /api/admin/backfill-from-ipn
 // Body: { ref: "m_payment_id or merchant_reference" }
 app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
@@ -184,19 +203,18 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
       );
     };
 
-    let upsert;
-    try {
-      upsert = await doUpsert();
     } catch (e) {
-      // If ON CONFLICT complains about missing unique constraint, create it and retry once
-      if ((e?.message || '').includes('no unique or exclusion constraint')) {
-        console.warn('[admin backfill] missing unique index on merchant_reference — creating and retrying');
-        await ensureMerchantRefUniqueIndex();
-        upsert = await doUpsert();
-      } else {
-        throw e;
-      }
-    }
+  const msg = (e?.message || '').toLowerCase();
+  const code = e?.code || '';
+  // Retry once if PG says the ON CONFLICT can't find a unique/exclusion constraint
+  if (msg.includes('no unique or exclusion constraint') || code === '42P10') {
+    console.warn('[admin backfill] missing unique index on merchant_reference — creating and retrying');
+    await ensureMerchantRefUniqueIndex();
+    upsert = await doUpsert();
+  } else {
+    throw e;
+  }
+}
 
     const savedRow = upsert.rows[0];
     console.log('[admin backfill] DONE payment_id=', savedRow?.id);
