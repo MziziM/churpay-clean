@@ -361,6 +361,8 @@ if (DATABASE_URL) {
 
 app.get("/", (_req, res) => res.json({ message: "Churpay Backend is running" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "backend" }));
+// Simple version endpoint (duplicate of debug version info)
+app.get("/api/version", (_req, res) => res.json(buildInfo));
 app.get("/api/payments", async (req, res) => {
   try {
     if (!pool) {
@@ -945,4 +947,6 @@ if (process.argv.includes('--migrate-only')) {
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log("Backend on", port));
+// Log build info once at startup for visibility in Render logs
+console.log("[Version]", JSON.stringify(buildInfo));
 // deploy-bump 2025-08-11T15:11:41Z
