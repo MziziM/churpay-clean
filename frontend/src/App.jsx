@@ -239,7 +239,13 @@ function IpnEventsPage({ apiBase, backendInfo }) {
                       <td>{ev.created_at ? new Date(ev.created_at).toLocaleString() : '-'}</td>
                     <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       {ref && (
-                        <a className="btn ghost" href={`/?q=${encodeURIComponent(ref)}#payments`} title="Find in payments table">View payment</a>
+                        <a
+  className="btn ghost"
+  href={`/payment/ref/${encodeURIComponent(ref)}`}
+  title="Open this payment on the dashboard"
+>
+  View payment
+</a>
                       )}
                       <button className="btn ghost" onClick={() => copyJson(ev.raw || ev)} title="Copy raw JSON">Copy JSON</button>
                       <button className="btn" onClick={() => toggleExpand(ev.id)} title={isOpen ? 'Hide raw' : 'Show raw'}>
@@ -1148,6 +1154,29 @@ const loadBackendInfo = async () => {
 
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
+
+  // Deep links:
+//   /payment/<id>         -> redirects to "/?q=<id>#payments"
+//   /payment/ref/<ref>    -> redirects to "/?q=<ref>#payments"
+if (path.startsWith("/payment/")) {
+  try {
+    const segs = path.split("/").filter(Boolean); // ["payment", ...]
+    let q = "";
+    if (segs[1] === "ref" && segs[2]) {
+      q = decodeURIComponent(segs[2]);
+    } else if (segs[1]) {
+      q = decodeURIComponent(segs[1]); // treat as id or pf id
+    }
+    if (q) {
+      // our dashboard already auto-opens the detail drawer when ?q=... & #payments
+      window.location.replace(`/?q=${encodeURIComponent(q)}#payments`);
+      return null;
+    }
+  } catch {}
+  // fallback home
+  window.location.replace("/#payments");
+  return null;
+}
   // Load settings from backend and apply CSS brand
   useEffect(() => {
     let cancelled = false;
