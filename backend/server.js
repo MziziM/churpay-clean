@@ -168,20 +168,6 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
   const { ref } = req.body || {};
   if (!ref) return res.status(400).json({ error: 'ref required' });
   if (!pool) return res.status(500).json({ error: 'no db' });
-let upsert;
-try {
-  upsert = await doUpsert();
-} catch (e) {
-  const msg = (e?.message || '').toLowerCase();
-  const code = e?.code || '';
-  if (msg.includes('no unique or exclusion constraint') || code === '42P10') {
-    console.warn('[admin backfill] missing unique constraint — creating and retrying');
-    await ensureMerchantRefUniqueIndex();
-    upsert = await doUpsert();
-  } else {
-    throw e;
-  }
-}
   try {
     console.log('[admin backfill] START ref=', ref);
 
@@ -512,23 +498,6 @@ if (DATABASE_URL) {
     -- Add a true UNIQUE CONSTRAINT (works with ON CONFLICT reliably)
     ALTER TABLE payments
       ADD CONSTRAINT payments_merchant_reference_key UNIQUE (merchant_reference);
-  `,
-},
-
-{
-  version: '005_uq_payments_merchant_reference',
-  sql: `
-    -- Add a full UNIQUE constraint so "ON CONFLICT (merchant_reference)" works.
-    -- (Allows multiple NULLs; enforces uniqueness for non-NULLs.)
-    DO $$
-    BEGIN
-      ALTER TABLE payments
-        ADD CONSTRAINT uq_payments_merchant_reference UNIQUE (merchant_reference);
-    EXCEPTION
-      WHEN duplicate_object THEN
-        -- already exists, ignore
-        NULL;
-    END $$;
   `,
 },
       ];
