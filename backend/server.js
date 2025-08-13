@@ -8,7 +8,6 @@ import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import nodemailer from 'nodemailer';
-// near the top, after imports
 import { execSync } from 'child_process';
 import os from 'os';
 
@@ -36,62 +35,74 @@ try {
 
 
 const app = express();
-// -------------------- Mailer (optional via env) --------------------
-const MAIL_HOST = process.env.MAIL_HOST || '';
-const MAIL_PORT = Number(process.env.MAIL_PORT || 0);
-const MAIL_USER = process.env.MAIL_USER || '';
-const MAIL_PASS = process.env.MAIL_PASS || '';
-const FROM_EMAIL = process.env.FROM_EMAIL || 'no-reply@churpay.com';
 
-let mailer = null;
-if (MAIL_HOST && MAIL_PORT && MAIL_USER && MAIL_PASS) {
-  mailer = nodemailer.createTransport({
-    host: MAIL_HOST,
-    port: MAIL_PORT,
-    secure: MAIL_PORT === 465, // true for 465, false for others
-    auth: { user: MAIL_USER, pass: MAIL_PASS },
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_FROM = process.env.SMTP_FROM || 'ChurPay <no-reply@churpay.com>';
+const TEST_RECEIPT_TO = process.env.TEST_RECEIPT_TO || '';
+
+let _mailer = null;
+async function getTransporter() {
+  if (_mailer) return _mailer;
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    console.log('[Mail] SMTP not fully configured — skipping email.');
+    return null;
+  }
+  const secure = SMTP_PORT === 465;
+  _mailer = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
-  mailer.verify().then(() => {
-    console.log('[Mail] transporter ready');
-  }).catch(err => {
-    console.warn('[Mail] verify failed:', err?.message || err);
-  });
-} else {
-  console.warn('[Mail] Not configured (set MAIL_HOST, MAIL_PORT, MAIL_USER, MAIL_PASS, FROM_EMAIL)');
+  try {
+    await _mailer.verify();
+    console.log('[Mail] transporter verified');
+  } catch (e) {
+    console.warn('[Mail] transporter verify failed:', e?.message || e);
+  }
+  return _mailer;
 }
 
-async function sendReceiptEmail({ to, amount, reference, status, payerName }) {
-  if (!mailer || !to) return false;
+async function sendReceiptEmail({ to, amount, reference, status }) {
   try {
-    const subject = `ChurPay receipt — ${status}`;
-    const prettyAmt = isFinite(Number(amount)) ? Number(amount).toFixed(2) : String(amount);
+    const tx = await getTransporter();
+    if (!tx) return { skipped: true };
+    const amt = Number(amount || 0);
+    const subject = `ChurPay receipt${reference ? ` (${reference})` : ''}`;
+    const text =
+      `Thank you for your payment.\n\n` +
+      `Reference: ${reference || '-'}\n` +
+      `Amount: ZAR ${isFinite(amt) ? amt.toFixed(2) : String(amount)}\n` +
+      `Status: ${status || '-'}\n\n` +
+      `If you have questions, reply to this email.\n— ChurPay`;
     const html = `
-      <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">
-        <h2 style="margin:0 0 8px 0;">ChurPay Receipt</h2>
-        <p style="margin:0 0 12px 0; color:#444;">${payerName ? `Hi ${payerName},` : 'Hello,'}</p>
-        <p style="margin:0 0 12px 0;">Thank you. Your payment status is <strong>${status}</strong>.</p>
-        <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;border:1px solid #eee;">
-          <tr><td style="border:1px solid #eee;">Reference</td><td style="border:1px solid #eee;"><code>${reference}</code></td></tr>
-          <tr><td style="border:1px solid #eee;">Amount</td><td style="border:1px solid #eee;">R ${prettyAmt}</td></tr>
-          <tr><td style="border:1px solid #eee;">Status</td><td style="border:1px solid #eee;">${status}</td></tr>
-        </table>
-        <p style="margin:12px 0 0 0; color:#777;">If you have any questions, reply to this email.</p>
+      <div style="font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;line-height:1.45">
+        <h2 style="margin:0 0 8px">ChurPay Receipt</h2>
+        <p><strong>Reference:</strong> ${reference || '-'}</p>
+        <p><strong>Amount:</strong> R ${isFinite(amt) ? amt.toFixed(2) : String(amount)}</p>
+        <p><strong>Status:</strong> ${status || '-'}</p>
+        <p style="color:#667">This email was sent from the ${process.env.NODE_ENV || 'development'} environment.</p>
       </div>`;
-    const text = `ChurPay receipt\n\nReference: ${reference}\nAmount: R ${prettyAmt}\nStatus: ${status}\n`;
-    await mailer.sendMail({
-      from: FROM_EMAIL,
+    const info = await tx.sendMail({
+      from: SMTP_FROM,
       to,
       subject,
       text,
       html,
     });
-    console.log('[Mail] receipt sent to', to);
-    return true;
+    console.log('[Mail] sent', info.messageId, '→', to);
+    return { ok: true };
   } catch (e) {
-    console.warn('[Mail] send failed:', e?.message || e);
-    return false;
+    console.error('[Mail] send error', e);
+    return { ok: false, error: e?.message || String(e) };
   }
 }
+
+
+
 // ------------------ end Mailer setup ------------------
 app.use((req, res, next) => {
   res.header('Vary', 'Origin');
@@ -654,6 +665,25 @@ app.post("/api/payfast/initiate", async (req, res) => {
   return res.json({ redirect: redirectUrl, merchant_reference });
 });
 
+app.post('/api/admin/test-email', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const to = (req.body && req.body.to) || TEST_RECEIPT_TO || '';
+    if (!to) return res.status(400).json({ error: 'missing to' });
+    const out = await sendReceiptEmail({
+      to,
+      amount: 10,
+      reference: `TEST_${Date.now()}`,
+      status: 'TEST',
+    });
+    if (!out.ok && !out.skipped) {
+      return res.status(500).json({ error: out.error || 'send failed' });
+    }
+    return res.json({ ok: true, to, skipped: !!out.skipped });
+  } catch {
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
 app.post("/api/payfast/ipn", async (req, res) => {
   console.log('[PayFast][IPN] hit', new Date().toISOString());
   try {
@@ -936,14 +966,7 @@ app.post('/api/admin/payments/:id/tag', requireAuth, requireAdmin, async (req, r
 });
 // ---------------- end admin payment actions ----------------
 
-// Allow one-off migrations via CLI flag
-if (process.argv.includes('--migrate-only')) {
-  if (!pool) {
-    console.warn('[DB] No DATABASE_URL configured, nothing to migrate.');
-    process.exit(0);
-  }
-  runMigrations().then(() => process.exit(0)).catch(() => process.exit(1));
-}
+
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log("Backend on", port));

@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, Fragment } from "react";
 import "./App.css";
 import Deck from "./Deck.jsx";
 import Login from "./pages/Login.jsx";
 import Admin from "./pages/Admin.jsx";
 import Settings from "./pages/Settings.jsx";
 import { isAuthed } from "./auth.js";
-import IpnEvents from "./pages/IpnEvents.jsx";
 
 function PayfastReturn() {
   useEffect(() => {
@@ -52,6 +51,51 @@ function PayfastCancel() {
       <p className="muted" style={{ marginTop: 10 }}>
         No money moved. You can start a new payment anytime.
       </p>
+    </div>
+  );
+}
+
+function EmailTools() {
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const API_BASE = (import.meta?.env?.VITE_API_URL || '').replace(/\/$/, '');
+
+  const sendTest = async () => {
+    if (!to.trim()) { alert('Enter recipient email first'); return; }
+    try {
+      setBusy(true);
+      const r = await fetch(`${API_BASE}/api/admin/test-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ to }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        alert(`Send failed: ${j.error || r.status}`);
+        return;
+      }
+      alert('Test email queued.');
+    } catch {
+      alert('Network error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <input
+        className="input"
+        placeholder="someone@example.com"
+        value={to}
+        onChange={(e)=>setTo(e.target.value)}
+        style={{ width: 260 }}
+      />
+      <button className="btn" onClick={sendTest} disabled={busy}>
+        {busy ? 'Sending…' : 'Send test receipt'}
+      </button>
+      <div className="muted">Uses your SMTP settings (Mailtrap in dev).</div>
     </div>
   );
 }
@@ -186,7 +230,7 @@ function IpnEventsPage({ apiBase, backendInfo }) {
                 const ref = ev.raw?.m_payment_id || ev.merchant_reference || '';
                 const isOpen = expanded.has(ev.id);
                 return (
-                  <>
+                  <Fragment key={ev.id}>
                     <tr>
                       <td>{ev.id}</td>
                       <td>{ev.raw?.pf_payment_id || ev.pf_payment_id || '-'}</td>
@@ -212,7 +256,7 @@ function IpnEventsPage({ apiBase, backendInfo }) {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -223,7 +267,7 @@ function IpnEventsPage({ apiBase, backendInfo }) {
   );
 }
 
-
+// (Test email UI lives in Admin.jsx)
 // --- Toasts UI (aria-live for accessibility) ---
 function Toasts({ toasts }) {
   return (
@@ -1113,13 +1157,6 @@ const loadBackendInfo = async () => {
     }
   }, [path]);
 
-<Route path="/ipn-events" element={<IpnEvents />} />
-{/* Topbar right-side links */}
-<nav className="topbar-nav">
-  <a href="/" className="link">Payments</a>
-  <a href="/ipn-events" className="link">IPN Events</a>
-  <a href="/admin" className="link">Admin</a>
-</nav>
   // Auto-refresh payments every 30s (pause while busy or off main page)
   useEffect(() => {
     const t = setInterval(() => {

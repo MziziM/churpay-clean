@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  
   "scripts": {
     "dev": "vite",
     "build": "ROLLUP_SKIP_NODEJS_NATIVE=1 vite build",

@@ -15,6 +15,37 @@ export default function Admin() {
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
     []
   );
+    // --- Tiny sparkline component (pure SVG, no libs) ---
+  function _scaleSeries(series, width, height, pad = 2) {
+    const n = series.length;
+    if (n === 0) return { points: [] };
+    const min = Math.min(...series);
+    const max = Math.max(...series);
+    const span = max - min || 1; // avoid div by zero
+    const stepX = (width - pad * 2) / Math.max(1, n - 1);
+    const pts = series.map((v, i) => {
+      const x = pad + i * stepX;
+      const y = pad + (height - pad * 2) * (1 - (v - min) / span);
+      return [x, y];
+    });
+    return { points: pts, min, max };
+  }
+
+  function Sparkline({ series, width = 140, height = 36, showGrid = false, title }) {
+    if (!series || series.length < 2) return null;
+    const { points } = _scaleSeries(series, width, height);
+    const d = points.map(([x,y], i) => `${i ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+    return (
+      <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title || 'trend'} focusable="false">
+        {showGrid && (
+          <g className="grid">
+            <line x1="0" y1="18" x2={width} y2="18" />
+          </g>
+        )}
+        <path d={d} />
+      </svg>
+    );
+  }
 
   const readLogs = () => {
     try {

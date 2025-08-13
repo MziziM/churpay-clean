@@ -756,3 +756,10 @@ mark {
   padding: 0 2px;
   border-radius: 3px;
 }
+.badge.soft { background: rgba(0,0,0,0.06); color: #555; }
+.badge.warn { background: #fff6e5; color: #ad6a00; }
+.badge.success { background: #e8fff2; color: #0f8a43; }
+.badge.danger { background: #ffe9e9; color: #b40000; }
+.link { color: var(--brand, #6b4fff); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.table-wrap { overflow: auto; }
