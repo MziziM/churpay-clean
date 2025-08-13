@@ -5,6 +5,8 @@ import Login from "./pages/Login.jsx";
 import Admin from "./pages/Admin.jsx";
 import Settings from "./pages/Settings.jsx";
 import { isAuthed } from "./auth.js";
+// import PaymentDetailPage from './pages/PaymentDetailPage'; // (disabled: we use the inline PaymentDetailPage below)
+
 
 function PayfastReturn() {
   useEffect(() => {
@@ -53,6 +55,21 @@ function PayfastCancel() {
       </p>
     </div>
   );
+}
+
+// --- Wrapper to support route-like usage without react-router ---
+// Intended equivalent of:
+// <Route path="/payment/ref/:refId/view" element={<PaymentDetailPageWrapper />} />
+// We don't use react-router here; App() decides by inspecting window.location.
+function PaymentDetailPageWrapper() {
+  // Derive apiBase locally (same logic App() uses)
+  const apiBase =
+    (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/$/, '') ||
+    (typeof window !== 'undefined' && window.location.hostname.includes('churpay.com')
+      ? 'https://api.churpay.com'
+      : 'http://localhost:5000');
+
+  return <PaymentDetailPage apiBase={apiBase} />;
 }
 
 function EmailTools() {
@@ -121,6 +138,29 @@ function PaymentDetailPage({ apiBase }) {
       return "";
     }
   };
+
+  // add near the top of PaymentDetailPage
+const [backfilling, setBackfilling] = useState(false);
+const doBackfill = async () => {
+  if (!ref) return;
+  try {
+    setBackfilling(true);
+    const r = await fetch(`${apiBase}/api/admin/backfill-from-ipn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ref })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(j.error || 'Backfill failed'); return; }
+    alert('Backfilled. Reloading…');
+    window.location.href = `/payment/ref/${encodeURIComponent(ref)}/view`;
+  } catch {
+    alert('Network error');
+  } finally {
+    setBackfilling(false);
+  }
+};
 
   const ref = refFromPath();
 
@@ -218,6 +258,9 @@ function PaymentDetailPage({ apiBase }) {
                 <a className="btn ghost" href={`/ipn-events?ref=${encodeURIComponent(ref)}`} title="Open in IPN Events">
                   View in IPN Events
                 </a>
+                <button className="btn btn-primary" onClick={doBackfill} disabled={backfilling}>
+                  {backfilling ? 'Backfilling…' : 'Create payment from this IPN'}
+                </button>
                 <a className="btn" href="/#payments">Back to dashboard</a>
               </div>
             </>
@@ -1355,7 +1398,8 @@ const loadBackendInfo = async () => {
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
 // Dedicated payment detail page
 if (path.startsWith('/payment/ref/') && path.endsWith('/view')) {
-  return <PaymentDetailPage apiBase={apiBase} />;
+  // Equivalent to a router element: <Route path="/payment/ref/:refId/view" element={<PaymentDetailPageWrapper />} />
+  return <PaymentDetailPageWrapper />;
 }
   // Handle deep links without a full reload.
   // Supported:
