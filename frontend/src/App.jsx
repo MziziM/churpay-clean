@@ -915,7 +915,24 @@ const loadBackendInfo = async () => {
   // --- Search + Quick Filters + Date Range for Payments Table ---
   const filteredPayments = useMemo(() => {
     let result = payments;
+// Auto-open details when arriving with ?q= or ?ref= and #payments
+useEffect(() => {
+  try {
+    const url = new URL(window.location.href);
+    const qp = url.searchParams.get('q') || url.searchParams.get('ref');
+    const wantsPayments = url.hash === '#payments';
 
+    if (qp && wantsPayments && filteredPayments.length > 0 && !detail) {
+      // If there’s an exact ref match, prefer that; otherwise open the first result
+      const exact = filteredPayments.find(p =>
+        String(p.merchant_reference || '').toLowerCase() === qp.toLowerCase() ||
+        String(p.pf_payment_id || '').toLowerCase() === qp.toLowerCase()
+      );
+      setDetail(exact || filteredPayments[0]);
+    }
+  } catch {}
+// include filteredPayments/detail so it reacts after list loads
+}, [filteredPayments, detail]);
     // Status filter
     if (statusFilter !== "All") {
       result = result.filter((p) => {
