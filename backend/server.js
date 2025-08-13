@@ -109,15 +109,36 @@ async function sendReceiptEmail({ to, amount, reference, status }) {
 
 // POST /api/admin/backfill-from-ipn
 // Body: { ref: "m_payment_id or merchant_reference" }
+// Helper to ensure unique index on merchant_reference exists (for ON CONFLICT to work)
+async function ensureMerchantRefUniqueIndex() {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_merchant_reference
+        ON payments(merchant_reference)
+        WHERE merchant_reference IS NOT NULL;
+    `);
+  } catch (e) {
+    console.warn('[DB] ensureMerchantRefUniqueIndex failed', e?.message || e);
+  }
+}
+
+// POST /api/admin/backfill-from-ipn
+// Body: { ref: "m_payment_id or merchant_reference" }
 app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
   const { ref } = req.body || {};
   if (!ref) return res.status(400).json({ error: 'ref required' });
   if (!pool) return res.status(500).json({ error: 'no db' });
 
   try {
-    // find latest IPN for that ref
+    console.log('[admin backfill] START ref=', ref);
+
+    // Make sure the unique index exists so ON CONFLICT works even on older DBs
+    await ensureMerchantRefUniqueIndex();
+
+    // 1) find latest IPN for that ref
     const ipn = await pool.query(
-      `SELECT id, pf_payment_id, status, created_at, raw
+      `SELECT id, pf_payment_id, created_at, raw
          FROM ipn_events
         WHERE (raw->>'m_payment_id') = $1
            OR (raw->>'merchant_reference') = $1
@@ -125,11 +146,15 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
         LIMIT 1`,
       [ref]
     );
+
     if (ipn.rowCount === 0) {
+      console.log('[admin backfill] no ipn for ref', ref);
       return res.status(404).json({ error: 'no ipn for ref' });
     }
+
     const ev = ipn.rows[0];
     const raw = ev.raw || {};
+
     const amount = Number(raw.amount_gross || raw.amount || 0) || 0;
     const payerName = raw.name_first && raw.name_last ? `${raw.name_first} ${raw.name_last}` : (raw.name_first || null);
     const payerEmail = raw.email_address || null;
@@ -137,60 +162,51 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
     const pfId = raw.pf_payment_id || ev.pf_payment_id || null;
     const merchantRef = raw.m_payment_id || raw.merchant_reference || ref;
 
-    // upsert by merchant_reference (robust: fall back to manual upsert if index missing)
-    let savedRow = null;
-    try {
-      const up = await pool.query(
-        `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (merchant_reference)
-         DO UPDATE SET
-           pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
-           amount        = CASE WHEN payments.amount IS NULL OR payments.amount = 0 THEN EXCLUDED.amount ELSE payments.amount END,
-           status        = EXCLUDED.status,
-           payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
-           payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)
+    console.log('[admin backfill] ipn_row', { ipn_id: ev.id, pfId, merchantRef, amount, status, payerEmail, payerName });
+
+    // 2) Idempotent upsert on merchant_reference (handles retries safely)
+    const doUpsert = async () => {
+      return pool.query(
+        `INSERT INTO payments (merchant_reference, pf_payment_id, amount, status, payer_email, payer_name)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (merchant_reference) DO UPDATE
+         SET pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
+             amount        = CASE
+                               WHEN payments.amount IS NULL OR payments.amount = 0
+                                 THEN EXCLUDED.amount
+                               ELSE payments.amount
+                             END,
+             status        = EXCLUDED.status,
+             payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
+             payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)
          RETURNING *`,
-        [pfId, amount, status, merchantRef, payerEmail, payerName]
+        [merchantRef, pfId, amount, status, payerEmail, payerName]
       );
-      savedRow = up.rows[0];
+    };
+
+    let upsert;
+    try {
+      upsert = await doUpsert();
     } catch (e) {
-      console.warn('[admin backfill-from-ipn] upsert failed, falling back to manual upsert', e.code, e.message);
-      // Manual "upsert" without relying on ON CONFLICT
-      const exists = await pool.query(
-        'SELECT id FROM payments WHERE merchant_reference = $1 LIMIT 1',
-        [merchantRef]
-      );
-      if (exists.rowCount) {
-        const upd = await pool.query(
-          `UPDATE payments
-             SET pf_payment_id = COALESCE($1, pf_payment_id),
-                 amount        = CASE WHEN amount IS NULL OR amount = 0 THEN $2 ELSE amount END,
-                 status        = $3,
-                 payer_email   = COALESCE($5, payer_email),
-                 payer_name    = COALESCE($6, payer_name)
-           WHERE merchant_reference = $4
-           RETURNING *`,
-          [pfId, amount, status, merchantRef, payerEmail, payerName]
-        );
-        savedRow = upd.rows[0];
+      // If ON CONFLICT complains about missing unique constraint, create it and retry once
+      if ((e?.message || '').includes('no unique or exclusion constraint')) {
+        console.warn('[admin backfill] missing unique index on merchant_reference — creating and retrying');
+        await ensureMerchantRefUniqueIndex();
+        upsert = await doUpsert();
       } else {
-        const ins = await pool.query(
-          `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
-           VALUES ($1,$2,$3,$4,$5,$6)
-           RETURNING *`,
-          [pfId, amount, status, merchantRef, payerEmail, payerName]
-        );
-        savedRow = ins.rows[0];
+        throw e;
       }
     }
 
-    return res.json({ ok: true, payment: savedRow });
+    const savedRow = upsert.rows[0];
+    console.log('[admin backfill] DONE payment_id=', savedRow?.id);
+    return res.json({ ok: true, payment: savedRow, ipn_id: ev.id });
   } catch (e) {
-    console.error('[admin backfill-from-ipn] error', e);
-    return res.status(500).json({ error: 'internal' });
+    console.error('[admin backfill] ERROR', e);
+    return res.status(500).json({ error: 'internal', detail: e?.message || String(e), code: e?.code });
   }
 });
+
 
 // ------------------ end Mailer setup ------------------
 app.use((req, res, next) => {
