@@ -152,10 +152,10 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
   try {
     console.log('[admin backfill] START ref=', ref);
 
-    // Make sure the unique index exists so ON CONFLICT works even on older DBs
+    // Ensure the unique index exists so ON CONFLICT works
     await ensureMerchantRefUniqueIndex();
 
-    // 1) find latest IPN for that ref
+    // 1) Find latest IPN for the reference
     const ipn = await pool.query(
       `SELECT id, pf_payment_id, created_at, raw
          FROM ipn_events
@@ -203,18 +203,21 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
       );
     };
 
+    let upsert;
+    try {
+      upsert = await doUpsert();
     } catch (e) {
-  const msg = (e?.message || '').toLowerCase();
-  const code = e?.code || '';
-  // Retry once if PG says the ON CONFLICT can't find a unique/exclusion constraint
-  if (msg.includes('no unique or exclusion constraint') || code === '42P10') {
-    console.warn('[admin backfill] missing unique index on merchant_reference — creating and retrying');
-    await ensureMerchantRefUniqueIndex();
-    upsert = await doUpsert();
-  } else {
-    throw e;
-  }
-}
+      const msg = (e?.message || '').toLowerCase();
+      const code = e?.code || '';
+      // Retry once if PG says the ON CONFLICT can't find a unique/exclusion constraint
+      if (msg.includes('no unique or exclusion constraint') || code === '42P10') {
+        console.warn('[admin backfill] missing unique index on merchant_reference — creating and retrying');
+        await ensureMerchantRefUniqueIndex();
+        upsert = await doUpsert();
+      } else {
+        throw e;
+      }
+    }
 
     const savedRow = upsert.rows[0];
     console.log('[admin backfill] DONE payment_id=', savedRow?.id);
