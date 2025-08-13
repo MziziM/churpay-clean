@@ -100,6 +100,124 @@ function EmailTools() {
   );
 }
 
+function PaymentDetailPage({ apiBase }) {
+  const [loading, setLoading] = useState(true);
+  const [row, setRow] = useState(null);
+  const [err, setErr] = useState("");
+
+  const ZAR = useMemo(
+    () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
+    []
+  );
+
+  const renderStatus = (status) => {
+    const s = String(status || "").toUpperCase();
+    if (s.includes("COMPLETE") || s === "SUCCESS" || s === "PAID") {
+      return <span className="badge badge-ok">✔︎ Complete</span>;
+    }
+    if (s.includes("FAIL") || s.includes("ERROR")) {
+      return <span className="badge badge-err">✖︎ Failed</span>;
+    }
+    return <span className="badge badge-warn">• Pending</span>;
+  };
+
+  const copyText = (t) => navigator.clipboard.writeText(String(t || "")).catch(()=>{});
+
+  // Get ref from /payment/ref/:ref/view OR ?ref=
+  const refFromPath = () => {
+    try {
+      const { pathname, search } = window.location;
+      const segs = pathname.split("/").filter(Boolean); // ["payment","ref",":ref","view"]
+      if (segs[0] === "payment" && segs[1] === "ref" && segs[3] === "view") {
+        return decodeURIComponent(segs[2]);
+      }
+      const url = new URL(window.location.href);
+      return url.searchParams.get("ref") || "";
+    } catch { return ""; }
+  };
+
+  const ref = refFromPath();
+
+  useEffect(() => {
+    let gone = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setErr("");
+        const r = await fetch(`${apiBase}/api/payments?ref=${encodeURIComponent(ref)}`, { cache: "no-store" });
+        const j = await r.json().catch(()=>[]);
+        const rows = Array.isArray(j) ? j : (j.rows || []);
+        if (!gone) setRow(rows[0] || null);
+      } catch (e) {
+        if (!gone) setErr("Failed to load payment.");
+      } finally {
+        if (!gone) setLoading(false);
+      }
+    })();
+    return () => { gone = true; };
+  }, [apiBase, ref]);
+
+  return (
+    <div className="container">
+      <div className="topbar" style={{ boxShadow: '0 1px 0 var(--line)' }}>
+        <a className="btn ghost" href="/#payments">← Back to dashboard</a>
+        <div />
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h2 style={{marginTop:0}}>Payment Details</h2>
+        {!ref ? (
+          <div className="alert warn">Missing reference.</div>
+        ) : loading ? (
+          <div className="muted">Loading…</div>
+        ) : err ? (
+          <div className="alert err">{err}</div>
+        ) : !row ? (
+          <div className="alert warn">No payment found for <code>{ref}</code>.</div>
+        ) : (
+          <>
+            <div className="row" style={{ gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              {row.pf_payment_id && (
+                <button className="btn" onClick={()=>copyText(row.pf_payment_id)} title="Copy PF Payment ID">Copy PF ID</button>
+              )}
+              {row.merchant_reference && (
+                <button className="btn ghost" onClick={()=>copyText(row.merchant_reference)} title="Copy merchant reference">Copy Ref</button>
+              )}
+              <a className="btn ghost" href={`/?q=${encodeURIComponent(row.pf_payment_id || row.merchant_reference || '')}#payments`}>Find in table</a>
+            </div>
+
+            <div className="detail-grid">
+              <div>
+                <span className="label">PF Payment ID</span>
+                <div>{row.pf_payment_id || '-'}</div>
+              </div>
+              <div>
+                <span className="label">Merchant reference</span>
+                <div>{row.merchant_reference || '-'}</div>
+              </div>
+              <div>
+                <span className="label">Amount</span>
+                <div>{typeof row.amount === 'number' ? ZAR.format(row.amount) : (row.amount ?? '-')}</div>
+              </div>
+              <div>
+                <span className="label">Status</span>
+                <div>{renderStatus(row.status)}</div>
+              </div>
+              <div>
+                <span className="label">Payer</span>
+                <div>{row.payer_name || row.payer_email || '-'}</div>
+              </div>
+              <div>
+                <span className="label">Created</span>
+                <div>{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // --- IPN Events Page ---
 function IpnEventsPage({ apiBase, backendInfo }) {
@@ -241,12 +359,12 @@ function IpnEventsPage({ apiBase, backendInfo }) {
                     <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       {ref && (
                         <a
-                          className="btn ghost"
-                          href={`/payment/ref/${encodeURIComponent(ref)}`}
-                          title="Open this payment on the dashboard"
-                        >
-                          View payment
-                        </a>
+  className="btn ghost"
+  href={`/payment/ref/${encodeURIComponent(ref)}/view`}
+  title="Open payment detail page"
+>
+  View payment
+</a>
                       )}
                       <button className="btn ghost" onClick={() => copyJson(ev.raw || ev)} title="Copy raw JSON">Copy JSON</button>
                       <button className="btn" onClick={() => toggleExpand(ev.id)} title={isOpen ? 'Hide raw' : 'Show raw'}>
@@ -1183,7 +1301,10 @@ const loadBackendInfo = async () => {
 
   // --- Route handling (after hooks to satisfy rules-of-hooks) ---
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
-
+// Dedicated payment detail page
+if (path.startsWith('/payment/ref/') && path.endsWith('/view')) {
+  return <PaymentDetailPage apiBase={apiBase} />;
+}
   // Handle deep links without a full reload.
   // Supported:
   //   /payment/<id>       - treated as numeric id or PF id
