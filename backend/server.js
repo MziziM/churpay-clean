@@ -629,13 +629,14 @@ function phpUrlEncode(val) {
   // PHP rawurlencode compatibility (spaces => %20, also encode ! * ( ) ~)
   const s = String(val ?? "");
   return encodeURIComponent(s)
-    // DO NOT convert %20 to +; PayFast expects rawurlencode semantics.
+    .replace(/%20/g, "+")
     .replace(/!/g, "%21")
     .replace(/\*/g, "%2A")
     .replace(/\(/g, "%28")
     .replace(/\)/g, "%29")
     .replace(/~/g, "%7E");
 }
+
 // Note: Uses PHP rawurlencode semantics (spaces encoded as %20, not +)
 function signatureBase(obj, passphrase) {
   // Remove empty values and sort keys ascending
