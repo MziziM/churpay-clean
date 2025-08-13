@@ -105,6 +105,7 @@ function PaymentDetailPage({ apiBase }) {
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState(null);
   const [err, setErr] = useState("");
+  const [ipn, setIpn] = useState(null); // fallback: IPN event if no payment row exists
 
   // Derive ref from path /payment/ref/:ref/view OR fallback to ?ref=
   const refFromPath = () => {
@@ -129,10 +130,23 @@ function PaymentDetailPage({ apiBase }) {
       try {
         setLoading(true);
         setErr("");
+        setIpn(null);
         const r = await fetch(`${apiBase}/api/payments?ref=${encodeURIComponent(ref)}`, { cache: "no-store" });
         const j = await r.json().catch(() => []);
         const rows = Array.isArray(j) ? j : (j.rows || []);
         if (!gone) setRow(rows[0] || null);
+
+        // Fallback: if no payment row, try to find a matching IPN event
+        if (!gone && (!rows || rows.length === 0)) {
+          try {
+            const r2 = await fetch(`${apiBase}/api/ipn-events?ref=${encodeURIComponent(ref)}`, { cache: "no-store" });
+            const j2 = await r2.json().catch(() => []);
+            const list = Array.isArray(j2) ? j2 : (j2.rows || []);
+            if (!gone) setIpn(list[0] || null);
+          } catch {
+            // ignore IPN fallback errors
+          }
+        }
       } catch (e) {
         if (!gone) setErr("Failed to load payment.");
       } finally {
@@ -167,7 +181,49 @@ function PaymentDetailPage({ apiBase }) {
         ) : err ? (
           <div className="alert err">{err}</div>
         ) : !row ? (
-          <div className="alert warn">No payment found for <code>{ref}</code>.</div>
+          ipn ? (
+            <>
+              <div className="alert warn" style={{ marginBottom: 8 }}>
+                No payment row found for <code>{ref}</code>, but an IPN event exists. This usually means the IPN was received for a reference that wasn’t initiated from this app (or the row was not created).
+              </div>
+              <div className="detail-grid">
+                <div>
+                  <span className="label">IPN ID</span>
+                  <div>{ipn.id}</div>
+                </div>
+                <div>
+                  <span className="label">m_payment_id</span>
+                  <div>{ipn.raw?.m_payment_id || '-'}</div>
+                </div>
+                <div>
+                  <span className="label">PF Payment ID</span>
+                  <div>{ipn.raw?.pf_payment_id || ipn.pf_payment_id || '-'}</div>
+                </div>
+                <div>
+                  <span className="label">Status</span>
+                  <div>{(ipn.raw?.payment_status || ipn.status || '-').toString()}</div>
+                </div>
+                <div>
+                  <span className="label">Created</span>
+                  <div>{ipn.created_at ? new Date(ipn.created_at).toLocaleString() : '-'}</div>
+                </div>
+              </div>
+              <div className="card" style={{ marginTop: 12 }}>
+                <div className="card-title">Raw IPN JSON</div>
+                <pre style={{ margin: 0, padding: 12, background: 'var(--muted)', borderRadius: 8, overflowX: 'auto' }}>
+{JSON.stringify(ipn.raw || ipn, null, 2)}
+                </pre>
+              </div>
+              <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                <a className="btn ghost" href={`/ipn-events?ref=${encodeURIComponent(ref)}`} title="Open in IPN Events">
+                  View in IPN Events
+                </a>
+                <a className="btn" href="/#payments">Back to dashboard</a>
+              </div>
+            </>
+          ) : (
+            <div className="alert warn">No payment found for <code>{ref}</code>.</div>
+          )
         ) : (
           <>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
