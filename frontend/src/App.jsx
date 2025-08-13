@@ -237,15 +237,15 @@ function IpnEventsPage({ apiBase, backendInfo }) {
                       <td>{ref || '-'}</td>
                       <td>{(ev.raw?.payment_status || ev.status || '').toString()}</td>
                       <td>{ev.created_at ? new Date(ev.created_at).toLocaleString() : '-'}</td>
-                      <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        {ref && (
-                          <a className="btn ghost" href={`/?q=${encodeURIComponent(ref)}`} title="Find in payments table">View payment</a>
-                        )}
-                        <button className="btn ghost" onClick={() => copyJson(ev.raw || ev)} title="Copy raw JSON">Copy JSON</button>
-                        <button className="btn" onClick={() => toggleExpand(ev.id)} title={isOpen ? 'Hide raw' : 'Show raw'}>
-                          {isOpen ? 'Hide raw' : 'Show raw'}
-                        </button>
-                      </td>
+                    <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      {ref && (
+                        <a className="btn ghost" href={`/?q=${encodeURIComponent(ref)}#payments`} title="Find in payments table">View payment</a>
+                      )}
+                      <button className="btn ghost" onClick={() => copyJson(ev.raw || ev)} title="Copy raw JSON">Copy JSON</button>
+                      <button className="btn" onClick={() => toggleExpand(ev.id)} title={isOpen ? 'Hide raw' : 'Show raw'}>
+                        {isOpen ? 'Hide raw' : 'Show raw'}
+                      </button>
+                    </td>
                     </tr>
                     {isOpen && (
                       <tr>
@@ -452,6 +452,21 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [detail]);
 const searchRef = useRef(null);
+
+  // Seed search from URL (?q= or ?ref=) and optional hash scroll
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const qp = url.searchParams.get('q') || url.searchParams.get('ref');
+      if (qp) setQuery(qp);
+      if (url.hash === '#payments') {
+        setTimeout(() => {
+          const el = document.getElementById('payments');
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+      }
+    } catch {}
+  }, []);
 
   const ZAR = useMemo(
     () => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }),
@@ -1416,7 +1431,7 @@ if (path === "/settings") {
       </div>
 
       {/* Payments table */}
-      <div className="card">
+      <div className="card" id="payments">
         <div
           className="row"
           style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}
