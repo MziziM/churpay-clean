@@ -5,6 +5,8 @@ import Login from "./pages/Login.jsx";
 import Admin from "./pages/Admin.jsx";
 import Settings from "./pages/Settings.jsx";
 import { isAuthed } from "./auth.js";
+import IpnEvents from "./pages/IpnEvents.jsx";
+
 function PayfastReturn() {
   useEffect(() => {
     setTimeout(() => {
@@ -55,7 +57,7 @@ function PayfastCancel() {
 }
 
 // --- IPN Events Page ---
-function IpnEventsPage({ apiBase }) {
+function IpnEventsPage({ apiBase, backendInfo }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
@@ -154,7 +156,17 @@ function IpnEventsPage({ apiBase }) {
             <button className="btn ghost" onClick={()=>{ setQ(''); setFromDate(''); setToDate(''); load(); }}>Clear</button>
           )}
         </div>
-
+{backendInfo ? (
+  <div className="card" style={{ marginTop: 16 }}>
+    <div className="card-title">Backend Info</div>
+    <div className="grid two">
+      <div><strong>Version:</strong> {backendInfo?.version || 'n/a'}</div>
+      <div><strong>Commit:</strong> {backendInfo?.commit || 'unknown'}</div>
+      <div><strong>Built At:</strong> {backendInfo?.builtAt ? new Date(backendInfo.builtAt).toLocaleString() : 'n/a'}</div>
+      <div><strong>Env:</strong> {backendInfo?.env || 'n/a'} on {backendInfo?.host || 'n/a'}</div>
+    </div>
+  </div>
+) : null}
         <div className="tableWrap" style={{ marginTop: 10 }}>
           <table className="table">
             <thead>
@@ -314,6 +326,7 @@ export default function App() {
   const APP_ENV = (import.meta.env.VITE_ENV || "").trim().toLowerCase(); // "production" hides Sandbox badge
 
   const [health, setHealth] = useState(null);
+  const [backendInfo, setBackendInfo] = useState(null);
   const [payments, setPayments] = useState([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [amount, setAmount] = useState("50.00");
@@ -644,6 +657,16 @@ const searchRef = useRef(null);
     }
   };
 
+const loadBackendInfo = async () => {
+  try {
+    const r = await fetch(`${apiBase}/api/debug/version`, { cache: 'no-store' });
+    const j = await r.json().catch(() => null);
+    setBackendInfo(j);
+  } catch {
+    // ignore; badge just won’t show
+  }
+};
+
   const loadPayments = async () => {
     const pickRows = (j) => (Array.isArray(j) ? j : j?.rows || []);
     try {
@@ -746,6 +769,7 @@ const searchRef = useRef(null);
     loadHealth();
     loadPayments();
     loadIpnCount();
+    loadBackendInfo(); 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
 
@@ -1089,6 +1113,13 @@ const searchRef = useRef(null);
     }
   }, [path]);
 
+<Route path="/ipn-events" element={<IpnEvents />} />
+{/* Topbar right-side links */}
+<nav className="topbar-nav">
+  <a href="/" className="link">Payments</a>
+  <a href="/ipn-events" className="link">IPN Events</a>
+  <a href="/admin" className="link">Admin</a>
+</nav>
   // Auto-refresh payments every 30s (pause while busy or off main page)
   useEffect(() => {
     const t = setInterval(() => {
@@ -1173,7 +1204,7 @@ if (path === "/settings") {
 
   // IPN Events page route
   if (path.startsWith('/ipn-events')) {
-    return <IpnEventsPage apiBase={apiBase} />;
+    return <IpnEventsPage apiBase={apiBase} backendInfo={backendInfo} />;
   }
   // React-router routes for payfast return/cancel
   // If react-router is not set up, fallback to old path check
@@ -1219,6 +1250,15 @@ if (path === "/settings") {
           {((sandboxMode === true) || (sandboxMode === null && APP_ENV !== 'production')) && (
             <span className="badge">Sandbox</span>
           )}
+
+          {backendInfo?.version && (
+  <span
+    className="badge ghost"
+    title={backendInfo?.name ? `Backend: ${backendInfo.name}` : 'Backend version'}
+  >
+    v{backendInfo.version}
+  </span>
+)}
           {/* Live health + last updated badges */}
           {health?.ok ? (
             <span className="badge badge-ok" title="Backend reachable">API OK</span>
