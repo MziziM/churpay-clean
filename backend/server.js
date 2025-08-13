@@ -626,10 +626,11 @@ app.get('/api/payments/:id', async (req, res) => {
 
 // --- PayFast signature helpers ---
 function phpUrlEncode(val) {
-  // PHP rawurlencode compatibility (spaces => %20, also encode ! * ( ) ~)
+  // Use rawurlencode semantics: spaces => %20 (NOT +).
+  // PayFast engine appears to recompute signatures on %20 style encoding.
   const s = String(val ?? "");
   return encodeURIComponent(s)
-    .replace(/%20/g, "+")
+    // DO NOT replace %20 with '+'
     .replace(/!/g, "%21")
     .replace(/\*/g, "%2A")
     .replace(/\(/g, "%28")
