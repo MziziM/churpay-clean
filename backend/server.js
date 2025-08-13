@@ -137,22 +137,55 @@ app.post('/api/admin/backfill-from-ipn', requireAuth, async (req, res) => {
     const pfId = raw.pf_payment_id || ev.pf_payment_id || null;
     const merchantRef = raw.m_payment_id || raw.merchant_reference || ref;
 
-    // upsert by merchant_reference
-    const upsert = await pool.query(
-      `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (merchant_reference)
-       DO UPDATE SET
-         pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
-         amount        = CASE WHEN payments.amount IS NULL OR payments.amount = 0 THEN EXCLUDED.amount ELSE payments.amount END,
-         status        = EXCLUDED.status,
-         payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
-         payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)
-       RETURNING *`,
-      [pfId, amount, status, merchantRef, payerEmail, payerName]
-    );
+    // upsert by merchant_reference (robust: fall back to manual upsert if index missing)
+    let savedRow = null;
+    try {
+      const up = await pool.query(
+        `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (merchant_reference)
+         DO UPDATE SET
+           pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
+           amount        = CASE WHEN payments.amount IS NULL OR payments.amount = 0 THEN EXCLUDED.amount ELSE payments.amount END,
+           status        = EXCLUDED.status,
+           payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
+           payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)
+         RETURNING *`,
+        [pfId, amount, status, merchantRef, payerEmail, payerName]
+      );
+      savedRow = up.rows[0];
+    } catch (e) {
+      console.warn('[admin backfill-from-ipn] upsert failed, falling back to manual upsert', e.code, e.message);
+      // Manual "upsert" without relying on ON CONFLICT
+      const exists = await pool.query(
+        'SELECT id FROM payments WHERE merchant_reference = $1 LIMIT 1',
+        [merchantRef]
+      );
+      if (exists.rowCount) {
+        const upd = await pool.query(
+          `UPDATE payments
+             SET pf_payment_id = COALESCE($1, pf_payment_id),
+                 amount        = CASE WHEN amount IS NULL OR amount = 0 THEN $2 ELSE amount END,
+                 status        = $3,
+                 payer_email   = COALESCE($5, payer_email),
+                 payer_name    = COALESCE($6, payer_name)
+           WHERE merchant_reference = $4
+           RETURNING *`,
+          [pfId, amount, status, merchantRef, payerEmail, payerName]
+        );
+        savedRow = upd.rows[0];
+      } else {
+        const ins = await pool.query(
+          `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           RETURNING *`,
+          [pfId, amount, status, merchantRef, payerEmail, payerName]
+        );
+        savedRow = ins.rows[0];
+      }
+    }
 
-    return res.json({ ok: true, payment: upsert.rows[0] });
+    return res.json({ ok: true, payment: savedRow });
   } catch (e) {
     console.error('[admin backfill-from-ipn] error', e);
     return res.status(500).json({ error: 'internal' });
