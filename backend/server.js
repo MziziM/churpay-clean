@@ -390,6 +390,15 @@ if (DATABASE_URL) {
             ALTER TABLE payments ADD COLUMN IF NOT EXISTS tags TEXT[];
           `,
         },
+        {
+  version: '004_payments_unique_merchant_reference',
+  sql: `
+    -- Ensure fast lookup and enable ON CONFLICT on merchant_reference
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_merchant_reference
+      ON payments(merchant_reference)
+      WHERE merchant_reference IS NOT NULL;
+  `,
+},
       ];
       
 
