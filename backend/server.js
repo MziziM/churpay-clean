@@ -27,7 +27,6 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 const appPkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url)));
 
 
-
 // Add version info once during startup
 let buildInfo = {
   name: appPkg.name || 'backend',
@@ -1742,4 +1741,3 @@ const port = process.env.PORT || 5000;
 app.listen(port, () => console.log("Backend on", port));
 // Log build info once at startup for visibility in Render logs
 console.log("[Version]", JSON.stringify(buildInfo));
-// deploy-bump 2025-08-11T15:11:41Z
