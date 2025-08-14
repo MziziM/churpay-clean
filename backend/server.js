@@ -23,7 +23,7 @@ if (typeof _fetch === 'undefined') {
   console.log('[Init] node-fetch polyfill loaded');
 }
 
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 const appPkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url)));
 
 
@@ -47,12 +47,86 @@ try {
 
 
 
+
 const app = express();
 // Global middleware must come before routes (parsers, cookies, logging)
 app.use(morgan("tiny"));
 app.use(express.urlencoded({ extended: false })); // IPN (form-encoded)
 app.use(express.json());
 app.use(cookieParser());
+
+// ---------------- Memory store (JSON file) fallback when no DB ----------------
+// If no DATABASE_URL is configured, we persist to a local JSON file so data
+// survives restarts. This is safe in single-instance dev/sandbox only.
+const MEM_PATH = process.env.MEM_STORE_PATH || './churpay-data.json';
+let mem = { payments: [], ipn_events: [] };
+
+function memLoad() {
+  try {
+    if (existsSync(MEM_PATH)) {
+      const txt = readFileSync(MEM_PATH, 'utf8');
+      const obj = JSON.parse(txt);
+      if (obj && typeof obj === 'object') mem = { payments: obj.payments || [], ipn_events: obj.ipn_events || [] };
+    }
+  } catch (e) {
+    console.warn('[MEM] load failed:', e?.message || e);
+  }
+}
+function memSave() {
+  try {
+    writeFileSync(MEM_PATH, JSON.stringify(mem, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[MEM] save failed:', e?.message || e);
+  }
+}
+function memNextId(arr) {
+  return (arr.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0) || 0) + 1;
+}
+function memInsertPayment(row) {
+  const r = { id: memNextId(mem.payments), created_at: new Date().toISOString(), ...row };
+  mem.payments.unshift(r);
+  memSave();
+  return r;
+}
+function memUpsertPaymentByRef(merchant_reference, patch) {
+  let idx = mem.payments.findIndex(p => p.merchant_reference === merchant_reference);
+  if (idx === -1) {
+    return memInsertPayment({ merchant_reference, ...patch });
+  } else {
+    const cur = mem.payments[idx];
+    const updated = {
+      ...cur,
+      pf_payment_id: patch.pf_payment_id ?? cur.pf_payment_id ?? null,
+      amount: (cur.amount && Number(cur.amount) !== 0) ? cur.amount : (patch.amount ?? 0),
+      status: patch.status ?? cur.status,
+      payer_email: patch.payer_email ?? cur.payer_email ?? null,
+      payer_name: patch.payer_name ?? cur.payer_name ?? null,
+    };
+    mem.payments[idx] = updated;
+    memSave();
+    return updated;
+  }
+}
+function memInsertIpn(raw, pf_payment_id = null) {
+  const r = { id: memNextId(mem.ipn_events), pf_payment_id, raw, created_at: new Date().toISOString() };
+  mem.ipn_events.unshift(r);
+  memSave();
+  return r;
+}
+// Optional debug helpers
+app.get('/api/debug/mem', (req, res) => {
+  res.json({ path: MEM_PATH, counts: { payments: mem.payments.length, ipn_events: mem.ipn_events.length }, preview: { payments: mem.payments.slice(0,3), ipn_events: mem.ipn_events.slice(0,3) } });
+});
+app.post('/api/debug/mem/reset', (req, res) => {
+  mem = { payments: [], ipn_events: [] };
+  memSave();
+  res.json({ ok: true });
+});
+memLoad();
+// ---------------- end memory store ----------------
+
+// --- Payments provider toggle: 'payfast' (default when configured) or 'mock' for development ---
+const PAYMENTS_PROVIDER = (process.env.PAYMENTS_PROVIDER || 'mock').toLowerCase();
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -552,7 +626,12 @@ app.get("/api/version", (_req, res) => res.json(buildInfo));
 app.get("/api/payments", async (req, res) => {
   try {
     if (!pool) {
-      return res.status(200).json([]);
+      const ref = (req.query.ref || '').toString().trim();
+      if (ref) {
+        const rows = mem.payments.filter(p => p.merchant_reference === ref);
+        return res.status(200).json(rows);
+      }
+      return res.status(200).json(mem.payments.slice(0, 100));
     }
     const ref = (req.query.ref || '').toString().trim();
    if (ref) {
@@ -582,8 +661,17 @@ app.get("/api/payments", async (req, res) => {
 // Debug endpoint to read raw IPN events, filterable by ?ref= (matches m_payment_id or pf_payment_id)
 app.get('/api/ipn-events', async (req, res) => {
   try {
-    if (!pool) return res.status(200).json([]);
     const ref = (req.query.ref || '').toString().trim();
+    if (!pool) {
+      if (ref) {
+        const rows = mem.ipn_events.filter(ev =>
+          (ev.raw?.m_payment_id === ref) || (ev.pf_payment_id === ref)
+        ).slice(0,50);
+        return res.status(200).json(rows);
+      } else {
+        return res.status(200).json(mem.ipn_events.slice(0,50));
+      }
+    }
     if (ref) {
       const { rows } = await pool.query(
         `SELECT id, pf_payment_id, created_at, raw
@@ -614,6 +702,15 @@ app.get('/api/payments/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ error: 'invalid id' });
+  }
+  if (!pool) {
+    const payment = mem.payments.find(p => Number(p.id) === id);
+    if (!payment) return res.status(404).json({ error: 'not found' });
+    const ipn = mem.ipn_events.filter(ev =>
+      ev.raw?.m_payment_id === String(payment.merchant_reference || '') ||
+      ev.raw?.pf_payment_id === String(payment.pf_payment_id || '')
+    ).slice(0, 20);
+    return res.json({ payment, ipn });
   }
   try {
     const { rows } = await pool.query('SELECT * FROM payments WHERE id = $1 LIMIT 1', [id]);
@@ -823,6 +920,45 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.post("/api/payfast/initiate", async (req, res) => {
+  // If we're using the mock provider, short-circuit and return a redirect into our local mock checkout
+  // PAYMENTS_PROVIDER can be switched to 'mock' via env
+  if (PAYMENTS_PROVIDER === 'mock') {
+    try {
+      const FRONTEND_URL = process.env.FRONTEND_URL || "https://www.churpay.com";
+      const BACKEND_URL = process.env.BACKEND_URL || "https://api.churpay.com";
+      const amount = (Number(req.body.amount || 50)).toFixed(2);
+      const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
+
+      if (pool) {
+        try {
+          await pool.query(
+            `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [null, Number(amount), 'INITIATED', merchant_reference, null, null]
+          );
+        } catch (e) {
+          console.warn('[MockPay][Init] intent insert failed (non-fatal)', e?.message || e);
+        }
+      }
+      else {
+        memInsertPayment({
+          pf_payment_id: null,
+          amount: Number(amount),
+          status: 'INITIATED',
+          merchant_reference,
+          payer_email: null,
+          payer_name: null,
+        });
+      }
+
+      const redirectUrl = `${BACKEND_URL}/api/mockpay/checkout?amount=${encodeURIComponent(amount)}&ref=${encodeURIComponent(merchant_reference)}&return_url=${encodeURIComponent(FRONTEND_URL + '/payfast/return')}&cancel_url=${encodeURIComponent(FRONTEND_URL + '/payfast/cancel')}`;
+      return res.json({ redirect: redirectUrl, merchant_reference });
+    } catch (e) {
+      console.error('[MockPay][Init] error', e);
+      return res.status(500).json({ error: 'internal' });
+    }
+  }
+
   const mode = (process.env.PAYFAST_MODE || "sandbox").toLowerCase();
   const gateway = mode === "live"
     ? "https://www.payfast.co.za/eng/process"
@@ -860,6 +996,16 @@ app.post("/api/payfast/initiate", async (req, res) => {
     } catch (e) {
       console.warn('[PayFast][Init] intent insert failed (non-fatal)', e?.message || e);
     }
+  }
+  else {
+    memInsertPayment({
+      pf_payment_id: null,
+      amount: Number(amount),
+      status: 'INITIATED',
+      merchant_reference,
+      payer_email: null,
+      payer_name: null,
+    });
   }
 
   // Sign and redirect (with optional debug to compare passphrase modes)
@@ -910,8 +1056,9 @@ app.get('/api/payfast/initiate-form', async (req, res) => {
     // amount can come from query (?amount=10.00), default to 50
     const amount = (Number(req.query.amount || 50)).toFixed(2);
 
-    // Generate our strict merchant reference
-    const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
+    // Generate our strict merchant reference (allow override via query for testing)
+    const pinForm = (typeof req.query.m_payment_id === 'string') ? req.query.m_payment_id.trim() : '';
+    const merchant_reference = pinForm ? pinForm : `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
 
     const pfParams = {
       merchant_id,
@@ -935,6 +1082,16 @@ app.get('/api/payfast/initiate-form', async (req, res) => {
       } catch (e) {
         console.warn('[PayFast][Init-Form] intent insert failed (non-fatal)', e?.message || e);
       }
+    }
+    else {
+      memInsertPayment({
+        pf_payment_id: null,
+        amount: Number(amount),
+        status: 'INITIATED',
+        merchant_reference,
+        payer_email: null,
+        payer_name: null,
+      });
     }
 
     // Sign with passphrase selected by derivePayfastPassphrase (merchant_id aware)
@@ -980,7 +1137,9 @@ app.get('/api/payfast/signature-preview', async (req, res) => {
     const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
     const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
     const amount = (Number(req.query.amount || 50)).toFixed(2);
-    const merchant_reference = `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
+    // Allow callers to pin the m_payment_id so preview matches a previously created intent
+    const pin = (typeof req.query.m_payment_id === 'string') ? req.query.m_payment_id.trim() : '';
+    const merchant_reference = pin ? pin : `chur_${Date.now()}_${Math.random().toString(16).slice(2,8)}`;
 
     const pfParams = {
       merchant_id,
@@ -1003,6 +1162,8 @@ app.get('/api/payfast/signature-preview', async (req, res) => {
       mode,
       merchant_id,
       passphraseUsed: passphraseUsed ? '(set)' : '(empty)',
+      requested_m_payment_id: (typeof req.query.m_payment_id === 'string') ? req.query.m_payment_id : null,
+      used_m_payment_id: merchant_reference,
       params: pfParams,
       base,
       signature,
@@ -1013,6 +1174,135 @@ app.get('/api/payfast/signature-preview', async (req, res) => {
     return res.status(500).json({ error: 'internal' });
   }
 });
+
+
+// ---------------- MockPay (development-only provider) ----------------
+// GET /api/mockpay/checkout?amount=10.00&amp;ref=...&amp;return_url=...&amp;cancel_url=...
+// Renders a minimal page with "Simulate Success" and "Simulate Fail".
+app.get('/api/mockpay/checkout', async (req, res) => {
+  try {
+    const amount = (Number(req.query.amount || 50)).toFixed(2);
+    const ref = String(req.query.ref || '').trim();
+    const returnUrl = String(req.query.return_url || (process.env.FRONTEND_URL || 'https://www.churpay.com') + '/payfast/return');
+    const cancelUrl = String(req.query.cancel_url || (process.env.FRONTEND_URL || 'https://www.churpay.com') + '/payfast/cancel');
+
+    if (!ref) return res.status(400).send('Missing ref');
+
+    const html = `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>MockPay Checkout</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <style>
+        body { font-family: system-ui,-apple-system,Segoe UI,Arial,sans-serif; padding: 24px; max-width: 520px; margin: 0 auto; }
+        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+        h1 { font-size: 20px; margin: 0 0 12px; }
+        .meta { color: #555; font-size: 14px; margin-bottom: 16px; }
+        form { display: inline-block; margin-right: 8px; }
+        button { padding: 8px 14px; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; }
+        .ok { background: #e8f7ef; border-color: #b7e1c0; }
+        .bad { background: #fde8e8; border-color: #f5b5b5; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>MockPay</h1>
+        <div class="meta">Reference: <code>${ref}</code> &middot; Amount: <strong>R ${amount}</strong></div>
+        <form method="post" action="/api/mockpay/submit">
+          <input type="hidden" name="ref" value="${ref}">
+          <input type="hidden" name="amount" value="${amount}">
+          <input type="hidden" name="return_url" value="${returnUrl}">
+          <button class="ok" name="result" value="success" type="submit">Simulate Success</button>
+        </form>
+        <form method="post" action="/api/mockpay/submit">
+          <input type="hidden" name="ref" value="${ref}">
+          <input type="hidden" name="amount" value="${amount}">
+          <input type="hidden" name="cancel_url" value="${cancelUrl}">
+          <button class="bad" name="result" value="fail" type="submit">Simulate Fail</button>
+        </form>
+      </div>
+    </body>
+  </html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(html);
+  } catch (e) {
+    console.error('[MockPay][checkout] error', e);
+    return res.status(500).send('Error');
+  }
+});
+
+// POST /api/mockpay/submit
+// Body: ref, amount, result=success|fail, return_url, cancel_url
+app.post('/api/mockpay/submit', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const ref = String(req.body.ref || '').trim();
+    const amount = Number(req.body.amount || 0);
+    const result = String(req.body.result || '').toLowerCase();
+    const returnUrl = String(req.body.return_url || (process.env.FRONTEND_URL || 'https://www.churpay.com') + '/payfast/return');
+    const cancelUrl = String(req.body.cancel_url || (process.env.FRONTEND_URL || 'https://www.churpay.com') + '/payfast/cancel');
+
+    if (!ref || !Number.isFinite(amount)) return res.status(400).send('Bad request');
+
+    if (pool) {
+      try {
+        // Always record an "IPN-like" event for auditing/parity with PayFast
+        const raw = {
+          signature: '(mock)',
+          merchant_id: '(mock)',
+          amount_gross: amount.toFixed(2),
+          m_payment_id: ref,
+          merchant_key: '(mock)',
+          payment_status: result === 'success' ? 'COMPLETE' : 'FAILED'
+        };
+        await pool.query(`INSERT INTO ipn_events (pf_payment_id, raw) VALUES ($1,$2)`, [null, JSON.stringify(raw)]);
+      } catch (e) {
+        console.warn('[MockPay][submit] ipn_events insert failed', e?.message || e);
+      }
+    }
+    else {
+      const raw = {
+        signature: '(mock)',
+        merchant_id: '(mock)',
+        amount_gross: amount.toFixed(2),
+        m_payment_id: ref,
+        merchant_key: '(mock)',
+        payment_status: result === 'success' ? 'COMPLETE' : 'FAILED'
+      };
+      memInsertIpn(raw, null);
+    }
+
+    if (pool) {
+      try {
+        // Upsert payment record
+        const status = result === 'success' ? 'PAID' : 'FAILED';
+        await pool.query(
+          `INSERT INTO payments (merchant_reference, amount, status, pf_payment_id)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (merchant_reference) DO UPDATE
+           SET amount = EXCLUDED.amount, status = EXCLUDED.status`,
+          [ref, isFinite(amount) ? amount : 0, status, null]
+        );
+      } catch (e) {
+        console.warn('[MockPay][submit] payments upsert failed', e?.message || e);
+      }
+    }
+    else {
+      memUpsertPaymentByRef(ref, {
+        amount: isFinite(amount) ? amount : 0,
+        status: (result === 'success' ? 'PAID' : 'FAILED'),
+        pf_payment_id: null
+      });
+    }
+
+    // Redirect to the frontend just like the real gateway would
+    return res.redirect(result === 'success' ? returnUrl : cancelUrl);
+  } catch (e) {
+    console.error('[MockPay][submit] error', e);
+    return res.status(500).send('Error');
+  }
+});
+// ---------------- end MockPay ----------------
 
 // GET /api/payfast/diagnose?amount=10.00
 // Server-to-server probe: builds params, signs, POSTS to PayFast, and returns what happened.
@@ -1102,7 +1392,8 @@ app.post("/api/payfast/ipn", async (req, res) => {
     const configuredMerchantId = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
     // Extract signature and params
     const { signature: receivedSig, ...params } = req.body || {};
-    const passphrase = process.env.PAYFAST_PASSPHRASE || "";
+    // Choose passphrase based on merchant_id (sandbox test merchant 10000100 => empty)
+    const passphrase = derivePayfastPassphrase(params.merchant_id);
 
     // 1) Basic signature verification
     const base = signatureBase(params, passphrase);
@@ -1111,8 +1402,8 @@ app.post("/api/payfast/ipn", async (req, res) => {
     if (!verified) console.warn("[PayFast][IPN] Signature mismatch", { receivedSig, computed });
 
     // 2) Merchant ID must match
+    const ipnMerchant = String(params.merchant_id || '').trim();
     if (verified) {
-      const ipnMerchant = String(params.merchant_id || '').trim();
       if (!ipnMerchant || ipnMerchant !== configuredMerchantId) {
         console.warn('[PayFast][IPN] Merchant ID mismatch', { ipnMerchant, configuredMerchantId });
         verified = false;
@@ -1147,6 +1438,14 @@ app.post("/api/payfast/ipn", async (req, res) => {
         console.error('[IPN] amount lookup failed', e);
       }
     }
+    if (!pool && ref) {
+      const p = mem.payments.find(p => p.merchant_reference === ref);
+      if (p) {
+        expectedAmount = Number(p.amount);
+        amountOk = (Number(ipnAmount.toFixed(2)) === Number(expectedAmount.toFixed(2)));
+        if (!amountOk) console.warn('[PayFast][IPN][mem] Amount mismatch', { ref, expectedAmount, ipnAmount });
+      }
+    }
 
     const finalOk = verified && amountOk;
 
@@ -1162,6 +1461,9 @@ app.post("/api/payfast/ipn", async (req, res) => {
         console.error("[IPN] DB ipn_events insert error", e);
       }
     }
+    else {
+      try { memInsertIpn(req.body || {}, params.pf_payment_id || null); } catch {}
+    }
 
     // Upsert payment with final status if checks passed (strict), else mark INVALID
     if (pool) {
@@ -1175,17 +1477,38 @@ app.post("/api/payfast/ipn", async (req, res) => {
         await pool.query(
           `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
            VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (pf_payment_id) DO UPDATE
-           SET amount = EXCLUDED.amount,
-               status = EXCLUDED.status,
-               merchant_reference = EXCLUDED.merchant_reference,
-               payer_email = EXCLUDED.payer_email,
-               payer_name = EXCLUDED.payer_name`,
+           ON CONFLICT (merchant_reference) DO UPDATE
+           SET pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
+               amount        = CASE
+                                 WHEN payments.amount IS NULL OR payments.amount = 0
+                                   THEN EXCLUDED.amount
+                                 ELSE payments.amount
+                               END,
+               status        = EXCLUDED.status,
+               payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
+               payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)`,
           [pfId, isFinite(amt) ? amt : 0, status, merchant_reference, payer_email, payer_name]
         );
       } catch (e) {
         console.error("[IPN] payments upsert error", e);
       }
+    }
+    else {
+      try {
+        const pfId = params.pf_payment_id || null;
+        const status = finalOk ? String(params.payment_status || 'UNKNOWN') : 'INVALID';
+        const merchant_reference = ref;
+        const payer_email = params.email_address || params.payer_email || null;
+        const payer_name = params.name_first || params.payer_name || null;
+        const amt = Number(ipnAmount || 0);
+        memUpsertPaymentByRef(merchant_reference, {
+          pf_payment_id: pfId,
+          amount: isFinite(amt) ? amt : 0,
+          status,
+          payer_email,
+          payer_name
+        });
+      } catch {}
     }
 
     // Send receipt for successful payments (COMPLETE)
@@ -1214,7 +1537,38 @@ app.post("/api/payfast/ipn", async (req, res) => {
 // Admin-only: revalidate a payment using the latest stored IPN event for a given reference
 app.post('/api/payfast/revalidate', requireAuth, async (req, res) => {
   try {
-    if (!pool) return res.status(500).json({ error: 'no db' });
+    if (!pool) {
+      const ref = (req.body?.ref || '').toString().trim();
+      if (!ref) return res.status(400).json({ error: 'missing ref' });
+      const ipn = mem.ipn_events.find(ev => ev.raw?.m_payment_id === ref);
+      if (!ipn) return res.status(404).json({ error: 'no ipn for ref' });
+      const raw = ipn.raw || {};
+      const receivedSig = String(raw.signature || '').toLowerCase();
+      const passphrase = derivePayfastPassphrase(raw.merchant_id);
+      const { signature: _omit, ...paramsForSig } = raw;
+      const base = signatureBase(paramsForSig, passphrase);
+      const computed = md5hex(base);
+      const sigOk = !!(receivedSig && receivedSig === computed.toLowerCase());
+      const configuredMerchantId = String(process.env.PAYFAST_MERCHANT_ID || '').trim();
+      const ipnMerchant = String(raw.merchant_id || '').trim();
+      const merchantOk = ipnMerchant && ipnMerchant === configuredMerchantId;
+      const remoteOk = true; // no remote postback in memory mode
+      const ipnAmount = Number(raw.amount_gross || raw.amount || 0);
+      const p = mem.payments.find(p => p.merchant_reference === ref);
+      const expectedAmount = p ? Number(p.amount) : null;
+      const amountOk = (p && Number(ipnAmount.toFixed(2)) === Number(expectedAmount.toFixed(2))) || false;
+      const finalOk = sigOk && merchantOk && remoteOk && amountOk;
+      if (p) {
+        memUpsertPaymentByRef(ref, {
+          pf_payment_id: raw.pf_payment_id || null,
+          amount: isFinite(ipnAmount) ? ipnAmount : 0,
+          status: finalOk ? String(raw.payment_status || 'UNKNOWN') : 'INVALID',
+          payer_email: raw.email_address || raw.payer_email || null,
+          payer_name: raw.name_first || raw.payer_name || null,
+        });
+      }
+      return res.json({ ok: finalOk, checks: { sigOk, merchantOk, remoteOk, amountOk, expectedAmount, ipnAmount } });
+    }
     const ref = (req.body?.ref || '').toString().trim();
     if (!ref) return res.status(400).json({ error: 'missing ref' });
 
@@ -1277,12 +1631,16 @@ app.post('/api/payfast/revalidate', requireAuth, async (req, res) => {
       await pool.query(
         `INSERT INTO payments (pf_payment_id, amount, status, merchant_reference, payer_email, payer_name)
          VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (pf_payment_id) DO UPDATE
-         SET amount = EXCLUDED.amount,
-             status = EXCLUDED.status,
-             merchant_reference = EXCLUDED.merchant_reference,
-             payer_email = EXCLUDED.payer_email,
-             payer_name = EXCLUDED.payer_name`,
+         ON CONFLICT (merchant_reference) DO UPDATE
+         SET pf_payment_id = COALESCE(EXCLUDED.pf_payment_id, payments.pf_payment_id),
+             amount        = CASE
+                               WHEN payments.amount IS NULL OR payments.amount = 0
+                                 THEN EXCLUDED.amount
+                               ELSE payments.amount
+                             END,
+             status        = EXCLUDED.status,
+             payer_email   = COALESCE(EXCLUDED.payer_email, payments.payer_email),
+             payer_name    = COALESCE(EXCLUDED.payer_name, payments.payer_name)`,
         [pfId, isFinite(amt) ? amt : 0, status, ref, payer_email, payer_name]
       );
     } catch (e) {
